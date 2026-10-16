@@ -1,0 +1,4 @@
+<plugin>
+   <file name="ScenarioLab.dll"/>
+   <load env="SmartClient"/>
+</plugin>
