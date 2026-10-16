@@ -38,7 +38,7 @@ namespace ScenarioLab.Client
     /// </summary>
     internal sealed class RecordedFrameFetcher : IDisposable
     {
-        private sealed class Request
+        private sealed class FrameRequest
         {
             public Item Camera;
             public DateTime TimeUtc;
@@ -54,7 +54,7 @@ namespace ScenarioLab.Client
         private readonly object _lock = new object();
         private readonly AutoResetEvent _signal = new AutoResetEvent(false);
         private readonly Thread _thread;
-        private Request _pending;
+        private FrameRequest _pending;
         private volatile bool _stopping;
 
         public RecordedFrameFetcher()
@@ -67,7 +67,7 @@ namespace ScenarioLab.Client
         {
             lock (_lock)
             {
-                _pending = new Request { Camera = camera, TimeUtc = timeUtc, Step = step };
+                _pending = new FrameRequest { Camera = camera, TimeUtc = timeUtc, Step = step };
             }
             _signal.Set();
         }
@@ -104,7 +104,7 @@ namespace ScenarioLab.Client
             while (!_stopping)
             {
                 _signal.WaitOne();
-                Request request;
+                FrameRequest request;
                 lock (_lock)
                 {
                     request = _pending;
@@ -162,7 +162,7 @@ namespace ScenarioLab.Client
             }
         }
 
-        private static BitmapData Fetch(BitmapVideoSource source, Request request)
+        private static BitmapData Fetch(BitmapVideoSource source, FrameRequest request)
         {
             switch (request.Step)
             {
@@ -214,7 +214,7 @@ namespace ScenarioLab.Client
             }
         }
 
-        private static string DescribeMiss(Request request)
+        private static string DescribeMiss(FrameRequest request)
         {
             switch (request.Step)
             {
