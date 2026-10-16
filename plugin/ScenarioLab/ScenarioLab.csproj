@@ -52,6 +52,7 @@
     <Compile Include="Client\ScenarioLabWorkSpacePlugin.cs" />
     <Compile Include="Client\ScenarioLabViewItemPlugin.cs" />
     <Compile Include="Client\ScenarioLabViewItemManager.cs" />
+    <Compile Include="Client\RecordedFrameFetcher.cs" />
     <Compile Include="Client\ScenarioLabViewItemWpfUserControl.xaml.cs">
       <DependentUpon>ScenarioLabViewItemWpfUserControl.xaml</DependentUpon>
     </Compile>

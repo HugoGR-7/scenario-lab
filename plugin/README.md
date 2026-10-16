@@ -27,7 +27,8 @@ Smart Client loads `plugin.def`, which names `ScenarioLab.dll` and says "load in
 | `Client/ScenarioLabViewItemPlugin.cs` | Describes our panel type (`ViewItemPlugin`): ID, name, icon, factory | a class registered in a registry |
 | `Client/ScenarioLabViewItemManager.cs` | One per shown panel: its saved properties; creates the UI control | a factory |
 | `Client/ScenarioLabViewItemWpfUserControl.xaml` | The panel's layout (WPF, Windows Presentation Foundation) | an HTML template |
-| `Client/ScenarioLabViewItemWpfUserControl.xaml.cs` | The panel's code: cameras, live view, snapshot, clips | the view's event handlers |
+| `Client/ScenarioLabViewItemWpfUserControl.xaml.cs` | The panel's code: cameras, live view, frame picker, snapshot, clips | the view's event handlers |
+| `Client/RecordedFrameFetcher.cs` | Reads recorded frames from XProtect on a background thread | a worker thread with a "latest request wins" queue |
 
 Life cycle: Smart Client calls `Init()` after login (or when the panel appears) and `Close()` at logout (or when
 it disappears). Everything acquired in `Init()` is released in `Close()`.
@@ -35,9 +36,11 @@ it disappears). Everything acquired in `Init()` is released in `Close()`.
 ## What this build does
 
 1. **Cameras:** lists every camera in XProtect's configuration (`Configuration.Instance.GetItemsByKind(Kind.Camera)`).
-2. **Live view and snapshot:** shows the selected camera with XProtect's own video control (`ImageViewerWpfControl`)
-   and saves the displayed frame as a JPEG to `C:\ScenarioLab\snapshots`. The image comes through XProtect, as the
-   hackathon requires.
+2. **Live view and frame picker:** shows the selected camera live with XProtect's own video control
+   (`ImageViewerWpfControl`). Below it, a slider (last 2 minutes to 24 hours) and frame-step buttons pick a frame
+   from XProtect's recordings (`BitmapVideoSource`, at the camera's original resolution). **Save this frame as
+   snapshot** writes it as a PNG to `C:\ScenarioLab\snapshots`, named after the camera and the frame's own time.
+   The image comes through XProtect, as the hackathon requires.
 3. **Scenario:** saves the text as `<snapshot>.scenario.txt` next to the snapshot: the hand-off to video generation.
 4. **Generated clips:** lists and plays video files placed in `C:\ScenarioLab\clips` (until clips can be loaded
    into XProtect as recordings).
@@ -52,7 +55,9 @@ Every XProtect call follows a Milestone sample in
 [MIP reference](https://doc.developer.milestonesys.com/mipsdk/MIPHelp/index.html):
 
 - tab, layout, view item, camera tree walk: *Smart Client Workspace* (`SCWorkSpace`);
-- `ImageViewerWpfControl` and `GetCurrentDisplayedImageAsBitmap()`: *Video Preview* (`VideoPreview`).
+- `ImageViewerWpfControl`: *Video Preview* (`VideoPreview`);
+- `BitmapVideoSource` (recorded frames, one dedicated thread): *Video Replay* (`VideoReplay`) and
+  *RGB Video Enhancement* (`RGBVideoEnhancement`).
 
 ## Troubleshooting
 

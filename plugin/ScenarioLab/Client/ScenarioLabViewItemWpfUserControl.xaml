@@ -44,31 +44,66 @@
             <ListBox x:Name="_cameraList" DisplayMemberPath="Name" SelectionChanged="OnCameraSelected"/>
         </DockPanel>
 
-        <!-- 2. Live view and snapshot -->
+        <!-- 2. Live view, then pick a recorded frame and save it as the snapshot -->
         <Grid Grid.Column="1" Margin="0,0,10,0">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
+                <RowDefinition Height="2*"/>
+                <RowDefinition Height="Auto"/>
                 <RowDefinition Height="3*"/>
                 <RowDefinition Height="Auto"/>
-                <RowDefinition Height="2*"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
-            <TextBlock Grid.Row="0" Style="{StaticResource StepHeader}" Text="2. Live view and snapshot"/>
+            <TextBlock Grid.Row="0" Style="{StaticResource StepHeader}" Text="2. Live view"/>
             <!-- The XProtect image viewer is created in code (it needs this view item's WindowInformation). -->
             <Grid Grid.Row="1" x:Name="_liveViewHost" Background="#20000000">
                 <TextBlock x:Name="_liveViewPlaceholder" Text="Select a camera on the left"
                            HorizontalAlignment="Center" VerticalAlignment="Center" Style="{StaticResource Hint}"/>
             </Grid>
-            <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,8,0,8">
-                <Button Padding="10,4" Margin="0,0,6,0" x:Name="_snapshotButton" Content="Take snapshot" IsEnabled="False" Click="OnTakeSnapshot"/>
-                <Button Padding="10,4" Margin="0,0,6,0" x:Name="_openSnapshotsButton" Content="Open snapshot folder" Click="OnOpenSnapshotFolder"/>
-            </StackPanel>
-            <DockPanel Grid.Row="3">
-                <TextBlock DockPanel.Dock="Bottom" x:Name="_snapshotInfo" Style="{StaticResource Hint}"
-                           Text="No snapshot yet."/>
-                <Border BorderThickness="1" BorderBrush="#40808080">
-                    <Image x:Name="_snapshotImage" Stretch="Uniform"/>
-                </Border>
+
+            <TextBlock Grid.Row="2" Style="{StaticResource StepHeader}" Margin="0,12,0,6"
+                       Text="Pick a frame from the recording (original resolution)"/>
+            <Border Grid.Row="3" BorderThickness="1" BorderBrush="#40808080" Background="#20000000">
+                <Grid>
+                    <Image x:Name="_frameImage" Stretch="Uniform"/>
+                    <TextBlock x:Name="_framePlaceholder" Text="The recorded frame appears here"
+                               HorizontalAlignment="Center" VerticalAlignment="Center" Style="{StaticResource Hint}"/>
+                </Grid>
+            </Border>
+
+            <!-- Slider: seconds relative to "now" (when the camera was picked or Now was pressed). 0 = latest. -->
+            <DockPanel Grid.Row="4" Margin="0,8,0,0">
+                <ComboBox DockPanel.Dock="Right" x:Name="_rangeBox" Width="130" Margin="8,0,0,0"
+                          SelectionChanged="OnRangeChanged">
+                    <ComboBoxItem Content="Last 2 minutes" Tag="120"/>
+                    <ComboBoxItem Content="Last 10 minutes" Tag="600" IsSelected="True"/>
+                    <ComboBoxItem Content="Last hour" Tag="3600"/>
+                    <ComboBoxItem Content="Last 24 hours" Tag="86400"/>
+                </ComboBox>
+                <Slider x:Name="_timeSlider" Minimum="-600" Maximum="0" Value="0" IsEnabled="False"
+                        IsMoveToPointEnabled="True" VerticalAlignment="Center" ValueChanged="OnSliderChanged"/>
             </DockPanel>
+            <DockPanel Grid.Row="5" Margin="0,6,0,0">
+                <StackPanel DockPanel.Dock="Left" Orientation="Horizontal">
+                    <Button Padding="10,4" Margin="0,0,6,0" x:Name="_prevFrameButton" Content="◀ Frame" IsEnabled="False"
+                            ToolTip="Previous recorded frame" Click="OnPreviousFrame"/>
+                    <Button Padding="10,4" Margin="0,0,6,0" x:Name="_nextFrameButton" Content="Frame ▶" IsEnabled="False"
+                            ToolTip="Next recorded frame" Click="OnNextFrame"/>
+                    <Button Padding="10,4" Margin="0,0,12,0" x:Name="_nowButton" Content="Now" IsEnabled="False"
+                            ToolTip="Jump to the latest recorded frame" Click="OnNow"/>
+                </StackPanel>
+                <TextBlock x:Name="_frameTimeText" VerticalAlignment="Center" Text="" Opacity="0.85"/>
+            </DockPanel>
+            <StackPanel Grid.Row="6" Margin="0,8,0,0">
+                <StackPanel Orientation="Horizontal">
+                    <Button Padding="10,4" Margin="0,0,6,0" x:Name="_snapshotButton" Content="Save this frame as snapshot"
+                            IsEnabled="False" Click="OnTakeSnapshot"/>
+                    <Button Padding="10,4" Margin="0,0,6,0" x:Name="_openSnapshotsButton" Content="Open snapshot folder"
+                            Click="OnOpenSnapshotFolder"/>
+                </StackPanel>
+                <TextBlock x:Name="_snapshotInfo" Style="{StaticResource Hint}" Text="No snapshot yet."/>
+            </StackPanel>
         </Grid>
 
         <!-- 3. Scenario, generated clips, Hafnia results -->

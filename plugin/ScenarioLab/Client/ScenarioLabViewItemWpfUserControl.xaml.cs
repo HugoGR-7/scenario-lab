@@ -21,14 +21,15 @@ namespace ScenarioLab.Client
     ///
     /// What works in this build:
     ///   1. lists XProtect's cameras;
-    ///   2. shows live video of the selected camera and saves a snapshot of it through XProtect;
+    ///   2. shows live video of the selected camera; a slider and frame-step buttons pick a recorded frame (original
+    ///      resolution, read from XProtect's recordings), which is saved as the snapshot;
     ///   3. saves a scenario text next to the snapshot;
     ///   4. lists and plays local clip files from C:\ScenarioLab\clips.
     /// Placeholders: LLM scenario suggestions, Hafnia results.
     ///
     /// This build sends NO Hafnia requests and raises NO XProtect events.
-    /// XProtect calls are taken from Milestone's samples: "Smart Client Workspace" (camera list) and
-    /// "Video Preview" (ImageViewerWpfControl, GetCurrentDisplayedImageAsBitmap).
+    /// XProtect calls follow Milestone's samples: "Smart Client Workspace" (camera list), "Video Preview"
+    /// (ImageViewerWpfControl), "Video Replay" and "RGB Video Enhancement" (BitmapVideoSource, see RecordedFrameFetcher).
     /// </summary>
     public partial class ScenarioLabViewItemWpfUserControl : ViewItemWpfUserControl
     {
@@ -36,10 +37,17 @@ namespace ScenarioLab.Client
         private static readonly string ClipFolder = Path.Combine(ScenarioLabDefinition.DataFolder, "clips");
         private static readonly string[] ClipExtensions = { ".mp4", ".mov", ".avi", ".wmv", ".mkv" };
 
-        private ImageViewerWpfControl _imageViewer;   // XProtect's video control
+        private ImageViewerWpfControl _imageViewer;   // XProtect's live video control
         private bool _viewerConnected;
         private Item _selectedCamera;                 // an XProtect configuration item of kind Camera
+
+        private RecordedFrameFetcher _fetcher;        // reads recorded frames on a background thread
+        private RecordedFrame _shownFrame;            // the recorded frame currently shown (we own its Bitmap)
+        private DateTime _anchorUtc;                  // slider value 0 = this moment
+        private bool _movingSliderFromCode;           // true while code (not the user) moves the slider
+
         private string _lastSnapshotPath;
+        private DateTime _lastSnapshotFrameUtc;
 
         public ScenarioLabViewItemWpfUserControl()
         {
@@ -66,6 +74,10 @@ namespace ScenarioLab.Client
                 };
                 _liveViewHost.Children.Add(_imageViewer);
 
+                _fetcher = new RecordedFrameFetcher();
+                _fetcher.FrameReady += OnFrameReadyFromFetcher;
+                _fetcher.Problem += OnProblemFromFetcher;
+
                 LoadCameras();
                 LoadClips();
                 SetStatus("Ready. Data folder: " + ScenarioLabDefinition.DataFolder);
@@ -83,6 +95,16 @@ namespace ScenarioLab.Client
             {
                 _player.Stop();
                 _player.Close();
+
+                if (_fetcher != null)
+                {
+                    _fetcher.FrameReady -= OnFrameReadyFromFetcher;
+                    _fetcher.Problem -= OnProblemFromFetcher;
+                    _fetcher.Dispose();
+                    _fetcher = null;
+                }
+                ReplaceShownFrame(null);
+
                 if (_imageViewer != null)
                 {
                     if (_viewerConnected)
@@ -174,7 +196,13 @@ namespace ScenarioLab.Client
                 _imageViewer.Connect();
                 _viewerConnected = true;
 
-                _snapshotButton.IsEnabled = true;
+                // A different camera: forget the previous camera's frame, and show this one's latest recording.
+                ReplaceShownFrame(null);
+                _frameImage.Source = null;
+                _framePlaceholder.Visibility = Visibility.Visible;
+                SetFrameControlsEnabled(true);
+                JumpToNow();
+
                 SetStatus("Showing " + camera.Name + ".");
             }
             catch (Exception ex)
@@ -185,39 +213,173 @@ namespace ScenarioLab.Client
 
         #endregion
 
-        #region 2. Snapshot
+        #region 2. Pick a recorded frame
 
+        private void SetFrameControlsEnabled(bool enabled)
+        {
+            _timeSlider.IsEnabled = enabled;
+            _prevFrameButton.IsEnabled = enabled;
+            _nextFrameButton.IsEnabled = enabled;
+            _nowButton.IsEnabled = enabled;
+        }
+
+        private int SelectedRangeSeconds
+        {
+            get
+            {
+                var item = _rangeBox.SelectedItem as ComboBoxItem;
+                int seconds;
+                return item != null && int.TryParse(item.Tag as string, out seconds) ? seconds : 600;
+            }
+        }
+
+        /// <summary>Re-anchors the slider at the current time and asks for the latest recorded frame.</summary>
+        private void JumpToNow()
+        {
+            _anchorUtc = DateTime.UtcNow;
+            MoveSlider(0);
+            RequestFrame(_anchorUtc, FrameStep.AtOrBefore);
+        }
+
+        private void OnNow(object sender, RoutedEventArgs e)
+        {
+            JumpToNow();
+        }
+
+        private void OnRangeChanged(object sender, SelectionChangedEventArgs e)
+        {
+            // Fires once while the XAML is still being built (the default item is selected): ignore that one.
+            if (_timeSlider == null)
+            {
+                return;
+            }
+            _timeSlider.Minimum = -SelectedRangeSeconds;
+            if (_selectedCamera != null)
+            {
+                JumpToNow();
+            }
+        }
+
+        private void OnSliderChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+        {
+            if (_movingSliderFromCode || _selectedCamera == null)
+            {
+                return;
+            }
+            RequestFrame(_anchorUtc.AddSeconds(_timeSlider.Value), FrameStep.AtOrBefore);
+        }
+
+        private void OnPreviousFrame(object sender, RoutedEventArgs e)
+        {
+            RequestFrame(CurrentFrameTimeUtc(), FrameStep.Previous);
+        }
+
+        private void OnNextFrame(object sender, RoutedEventArgs e)
+        {
+            RequestFrame(CurrentFrameTimeUtc(), FrameStep.Next);
+        }
+
+        /// <summary>Time of the frame on screen, or the slider's time if no frame is shown yet.</summary>
+        private DateTime CurrentFrameTimeUtc()
+        {
+            return _shownFrame != null ? _shownFrame.TimeUtc : _anchorUtc.AddSeconds(_timeSlider.Value);
+        }
+
+        private void RequestFrame(DateTime timeUtc, FrameStep step)
+        {
+            if (_selectedCamera == null || _fetcher == null)
+            {
+                return;
+            }
+            _frameTimeText.Text = "Loading " + timeUtc.ToString("HH:mm:ss.fff") + " UTC ...";
+            _fetcher.Request(_selectedCamera, timeUtc, step);
+        }
+
+        /// <summary>Moves the slider without triggering a new request.</summary>
+        private void MoveSlider(double value)
+        {
+            _movingSliderFromCode = true;
+            _timeSlider.Value = Math.Max(_timeSlider.Minimum, Math.Min(_timeSlider.Maximum, value));
+            _movingSliderFromCode = false;
+        }
+
+        // Runs on the fetcher's background thread: hand the frame to the UI thread.
+        private void OnFrameReadyFromFetcher(RecordedFrame frame)
+        {
+            Dispatcher.BeginInvoke(new Action(() => ShowFrame(frame)));
+        }
+
+        // Runs on the fetcher's background thread.
+        private void OnProblemFromFetcher(string message)
+        {
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                _frameTimeText.Text = message;
+                SetStatus(message);
+            }));
+        }
+
+        private void ShowFrame(RecordedFrame frame)
+        {
+            // The answer may arrive after the user switched camera or closed the panel: then drop it.
+            if (_fetcher == null || _selectedCamera == null || !frame.Camera.FQID.Equals(_selectedCamera.FQID))
+            {
+                frame.Bitmap.Dispose();
+                return;
+            }
+            ReplaceShownFrame(frame);
+            _frameImage.Source = frame.Preview;
+            _framePlaceholder.Visibility = Visibility.Collapsed;
+            _snapshotButton.IsEnabled = true;
+
+            double secondsFromAnchor = (frame.TimeUtc - _anchorUtc).TotalSeconds;
+            MoveSlider(secondsFromAnchor);
+            _frameTimeText.Text = frame.TimeUtc.ToString("yyyy-MM-dd HH:mm:ss.fff") + " UTC   ("
+                + FormatAgo(-secondsFromAnchor) + ")   " + frame.Bitmap.Width + " × " + frame.Bitmap.Height + " px";
+        }
+
+        private void ReplaceShownFrame(RecordedFrame frame)
+        {
+            if (_shownFrame != null && _shownFrame != frame)
+            {
+                _shownFrame.Bitmap.Dispose();
+            }
+            _shownFrame = frame;
+        }
+
+        private static string FormatAgo(double seconds)
+        {
+            if (seconds < 1)
+            {
+                return "latest";
+            }
+            var span = TimeSpan.FromSeconds(seconds);
+            return span.TotalHours >= 1
+                ? string.Format("{0}h {1:00}m ago", (int)span.TotalHours, span.Minutes)
+                : string.Format("{0}m {1:00}.{2:0}s ago", (int)span.TotalMinutes, span.Seconds, span.Milliseconds / 100);
+        }
+
+        /// <summary>
+        /// Saves the recorded frame on screen at its original resolution, as PNG (lossless: no extra compression
+        /// artefacts in the picture we hand to the video model). The file name holds the frame's own time.
+        /// </summary>
         private void OnTakeSnapshot(object sender, RoutedEventArgs e)
         {
-            if (_selectedCamera == null || _imageViewer == null)
+            if (_shownFrame == null)
             {
                 return;
             }
             try
             {
-                // The frame XProtect is currently displaying (with any privacy mask applied). Null until the first
-                // image has arrived from the recording server.
-                Bitmap displayed = _imageViewer.GetCurrentDisplayedImageAsBitmap();
-                if (displayed == null)
-                {
-                    SetStatus("No image received yet from " + _selectedCamera.Name + ". Wait a second and try again.");
-                    return;
-                }
+                string fileName = SafeFileName(_shownFrame.Camera.Name) + "_" + _shownFrame.TimeUtc.ToString("yyyyMMdd'T'HHmmss.fff'Z'") + ".png";
+                string path = Path.Combine(SnapshotFolder, fileName);
+                _shownFrame.Bitmap.Save(path, ImageFormat.Png);
 
-                // The viewer keeps its own reference to that bitmap, so save a copy ("using" disposes it afterwards,
-                // like a Python "with" block).
-                using (var copy = new Bitmap(displayed))
-                {
-                    string fileName = SafeFileName(_selectedCamera.Name) + "_" + DateTime.UtcNow.ToString("yyyyMMdd'T'HHmmss'Z'") + ".jpg";
-                    string path = Path.Combine(SnapshotFolder, fileName);
-                    copy.Save(path, ImageFormat.Jpeg);
-
-                    _lastSnapshotPath = path;
-                    _snapshotImage.Source = LoadImageWithoutLocking(path);
-                    _snapshotInfo.Text = copy.Width + " × " + copy.Height + " px   " + path;
-                    _saveScenarioButton.IsEnabled = true;
-                    SetStatus("Snapshot saved: " + path);
-                }
+                _lastSnapshotPath = path;
+                _lastSnapshotFrameUtc = _shownFrame.TimeUtc;
+                _snapshotInfo.Text = "Saved " + _shownFrame.Bitmap.Width + " × " + _shownFrame.Bitmap.Height + " px   " + path;
+                _saveScenarioButton.IsEnabled = true;
+                SetStatus("Snapshot saved: " + path);
             }
             catch (Exception ex)
             {
@@ -256,6 +418,7 @@ namespace ScenarioLab.Client
                 var content = new StringBuilder()
                     .AppendLine("camera: " + _selectedCamera.Name)
                     .AppendLine("snapshot: " + Path.GetFileName(_lastSnapshotPath))
+                    .AppendLine("frame_utc: " + _lastSnapshotFrameUtc.ToString("o"))
                     .AppendLine("saved_utc: " + DateTime.UtcNow.ToString("o"))
                     .AppendLine("scenario:")
                     .AppendLine(text)
@@ -382,18 +545,6 @@ namespace ScenarioLab.Client
                 name = name.Replace(c, '_');
             }
             return name.Replace(' ', '_');
-        }
-
-        /// <summary>Loads an image fully into memory so the file is not kept open (and can be moved or deleted).</summary>
-        private static BitmapImage LoadImageWithoutLocking(string path)
-        {
-            var image = new BitmapImage();
-            image.BeginInit();
-            image.CacheOption = BitmapCacheOption.OnLoad;
-            image.UriSource = new Uri(path);
-            image.EndInit();
-            image.Freeze();
-            return image;
         }
 
         #endregion
