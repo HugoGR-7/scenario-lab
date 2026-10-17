@@ -11,13 +11,16 @@ using System.Web.Script.Serialization;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using VideoOS.Platform;
 using VideoOS.Platform.Client;
+using VideoOS.Platform.Messaging;
 using ScenarioLab.Hafnia;
 // Aliases: WPF and Windows Forms both have types called Image; we name the drawing ones explicitly.
 using Bitmap = System.Drawing.Bitmap;
 using ImageFormat = System.Drawing.Imaging.ImageFormat;
+using Message = VideoOS.Platform.Messaging.Message;
 
 namespace ScenarioLab.Client
 {
@@ -72,6 +75,7 @@ namespace ScenarioLab.Client
         private static readonly ObservableCollection<TestRun> _runs = new ObservableCollection<TestRun>();
         private static bool _testRunning;
         private bool _closed;
+        private object _themeChangedReceiver;
 
         public ScenarioLabViewItemWpfUserControl()
         {
@@ -103,6 +107,11 @@ namespace ScenarioLab.Client
                 _fetcher.Problem += OnProblemFromFetcher;
 
                 _closed = false;
+                ApplyThemeTextColor();
+                // Re-apply when the user switches between dark and light theme (Milestone: "Introduction to Smart
+                // Client themes", MessageId.SmartClient.ThemeChangedIndication).
+                _themeChangedReceiver = EnvironmentManager.Instance.RegisterReceiver(OnThemeChanged,
+                    new MessageIdFilter(MessageId.SmartClient.ThemeChangedIndication));
                 _runsGrid.ItemsSource = _runs;
                 if (_gateway != null && _gateway.IsLoggedIn)
                 {
@@ -124,6 +133,11 @@ namespace ScenarioLab.Client
         public override void Close()
         {
             _closed = true;   // stops a running test from updating this panel (the request itself continues)
+            if (_themeChangedReceiver != null)
+            {
+                EnvironmentManager.Instance.UnRegisterReceiver(_themeChangedReceiver);
+                _themeChangedReceiver = null;
+            }
             try
             {
                 _player.Stop();
@@ -789,6 +803,36 @@ namespace ScenarioLab.Client
         #endregion
 
         #region Helpers
+
+        /// <summary>
+        /// Smart Client themes WPF *controls* automatically (Button, TextBox, ...), but plain text (TextBlock) is not a
+        /// control, so it stayed black on the dark background. TextBlocks inherit the panel's Foreground, so set it to
+        /// the theme's TextColor (ClientControl.Instance.Theme, MIP reference "Theme Class").
+        /// </summary>
+        private void ApplyThemeTextColor()
+        {
+            try
+            {
+                // The reference lists TextColor as "Color" without saying which framework's Color type it is.
+                // Both System.Drawing.Color and WPF's Color have A, R, G, B bytes, so read them dynamically.
+                dynamic color = ClientControl.Instance.Theme.TextColor;
+                byte a = (byte)color.A, r = (byte)color.R, g = (byte)color.G, b = (byte)color.B;
+                if (a > 0)
+                {
+                    Foreground = new SolidColorBrush(System.Windows.Media.Color.FromArgb(a, r, g, b));
+                }
+            }
+            catch (Exception ex)
+            {
+                EnvironmentManager.Instance.Log(true, "ScenarioLab", "Theme text color not applied: " + ex.Message);
+            }
+        }
+
+        private object OnThemeChanged(Message message, FQID destination, FQID sender)
+        {
+            Dispatcher.BeginInvoke(new Action(ApplyThemeTextColor));
+            return null;
+        }
 
         private void SetStatus(string text)
         {

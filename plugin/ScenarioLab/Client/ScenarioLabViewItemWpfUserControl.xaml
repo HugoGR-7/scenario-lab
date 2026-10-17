@@ -167,8 +167,19 @@
                            Text="1 Hafnia request per click: the selected camera, 30 seconds around the picked frame."/>
                 <TextBlock x:Name="_runProgress" Margin="0,6,0,0" TextWrapping="Wrap"/>
 
+                <!-- Transparent rows and headers, text in the panel's (theme) colour: readable in dark and light theme. -->
                 <DataGrid x:Name="_runsGrid" Height="150" Margin="0,8,0,0" AutoGenerateColumns="False" IsReadOnly="True"
-                          HeadersVisibility="Column" SelectionMode="Single" SelectionChanged="OnRunSelected">
+                          HeadersVisibility="Column" SelectionMode="Single" SelectionChanged="OnRunSelected"
+                          Background="Transparent" RowBackground="Transparent" AlternatingRowBackground="#14808080"
+                          GridLinesVisibility="Horizontal" HorizontalGridLinesBrush="#40808080" BorderBrush="#40808080">
+                    <DataGrid.ColumnHeaderStyle>
+                        <Style TargetType="DataGridColumnHeader">
+                            <Setter Property="Background" Value="#30808080"/>
+                            <Setter Property="Foreground" Value="{Binding Foreground, RelativeSource={RelativeSource AncestorType=DataGrid}}"/>
+                            <Setter Property="Padding" Value="6,3"/>
+                            <Setter Property="FontWeight" Value="SemiBold"/>
+                        </Style>
+                    </DataGrid.ColumnHeaderStyle>
                     <DataGrid.Columns>
                         <DataGridTextColumn Header="Time" Binding="{Binding Time}"/>
                         <DataGridTextColumn Header="Camera" Binding="{Binding Camera}"/>
