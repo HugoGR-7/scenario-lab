@@ -1,15 +1,20 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Text.RegularExpressions;
+using System.Threading.Tasks;
+using System.Web.Script.Serialization;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media.Imaging;
 using VideoOS.Platform;
 using VideoOS.Platform.Client;
+using ScenarioLab.Hafnia;
 // Aliases: WPF and Windows Forms both have types called Image; we name the drawing ones explicitly.
 using Bitmap = System.Drawing.Bitmap;
 using ImageFormat = System.Drawing.Imaging.ImageFormat;
@@ -24,10 +29,12 @@ namespace ScenarioLab.Client
     ///   2. shows live video of the selected camera; a slider and frame-step buttons pick a recorded frame (original
     ///      resolution, read from XProtect's recordings), which is saved as the snapshot;
     ///   3. saves a scenario text next to the snapshot;
-    ///   4. lists and plays local clip files from C:\ScenarioLab\clips.
-    /// Placeholders: LLM scenario suggestions, Hafnia results.
+    ///   4. lists and plays local clip files from C:\ScenarioLab\clips;
+    ///   5. tests a detection question with Hafnia VLM on the picked moment (one request per click) and shows
+    ///      expected vs. got; a "detected" answer also raises the XProtect alarm through the gateway rule.
+    /// Placeholder: scenario suggestions.
     ///
-    /// This build sends NO Hafnia requests and raises NO XProtect events.
+    /// Hafnia requests: only from the "Run test" button, one per click, never in a loop, capped below the daily 500.
     /// XProtect calls follow Milestone's samples: "Smart Client Workspace" (camera list), "Video Preview"
     /// (ImageViewerWpfControl), "Video Replay" and "RGB Video Enhancement" (BitmapVideoSource, see RecordedFrameFetcher).
     /// </summary>
@@ -48,6 +55,23 @@ namespace ScenarioLab.Client
 
         private string _lastSnapshotPath;
         private DateTime _lastSnapshotFrameUtc;
+
+        // ---- 5. Test with Hafnia ----
+        private const string PromptTitle = "Scenario Lab";   // saved prompt on the gateway (hafnia/README.md)
+        private const string KeywordInstruction =
+            "First describe in one or two sentences what happens in the clip. Then, on the last line, write exactly one word: "
+            + "SCENARIO_DETECTED if this happens in the clip, SCENARIO_NOT_DETECTED if it does not.";
+        private const int DailyRequestCap = 450;              // refuse to send above this (the allowance is 500 a day)
+        private const int ClipSeconds = 30;
+        private static readonly string RunLogPath = Path.Combine(ScenarioLabDefinition.DataFolder, "runs.jsonl");
+
+        // Static = shared by the whole Smart Client process, so switching tabs keeps the gateway session and the
+        // test table. Memory only: gone when Smart Client closes. The password itself is never kept.
+        private static HafniaGatewayClient _gateway;
+        private static string _promptId;
+        private static readonly ObservableCollection<TestRun> _runs = new ObservableCollection<TestRun>();
+        private static bool _testRunning;
+        private bool _closed;
 
         public ScenarioLabViewItemWpfUserControl()
         {
@@ -78,8 +102,16 @@ namespace ScenarioLab.Client
                 _fetcher.FrameReady += OnFrameReadyFromFetcher;
                 _fetcher.Problem += OnProblemFromFetcher;
 
+                _closed = false;
+                _runsGrid.ItemsSource = _runs;
+                if (_gateway != null && _gateway.IsLoggedIn)
+                {
+                    _hafniaState.Text = "Connected to the Hafnia gateway.";
+                }
+
                 LoadCameras();
                 LoadClips();
+                UpdateHafniaControls();
                 SetStatus("Ready. Data folder: " + ScenarioLabDefinition.DataFolder);
             }
             catch (Exception ex)
@@ -91,6 +123,7 @@ namespace ScenarioLab.Client
         /// <summary>Called when the panel is no longer shown (tab closed, logout). Free everything here.</summary>
         public override void Close()
         {
+            _closed = true;   // stops a running test from updating this panel (the request itself continues)
             try
             {
                 _player.Stop();
@@ -202,6 +235,7 @@ namespace ScenarioLab.Client
                 _framePlaceholder.Visibility = Visibility.Visible;
                 SetFrameControlsEnabled(true);
                 JumpToNow();
+                UpdateHafniaControls();
 
                 SetStatus("Showing " + camera.Name + ".");
             }
@@ -507,6 +541,249 @@ namespace ScenarioLab.Client
         private void OnOpenClipFolder(object sender, RoutedEventArgs e)
         {
             OpenInExplorer(ClipFolder);
+        }
+
+        #endregion
+
+        #region 5. Test with Hafnia
+
+        private void UpdateHafniaControls()
+        {
+            bool connected = _gateway != null && _gateway.IsLoggedIn && _promptId != null;
+            _runTestButton.IsEnabled = connected && _selectedCamera != null && !_testRunning;
+        }
+
+        /// <summary>Logs in to the gateway (password used once, then forgotten), finds the saved prompt, shows the allowance.</summary>
+        private async void OnConnectHafnia(object sender, RoutedEventArgs e)
+        {
+            // "async void" is only allowed for event handlers: an exception escaping it would crash Smart Client,
+            // so everything is inside try/catch.
+            string password = _gatewayPassword.Password;
+            _gatewayPassword.Clear();
+            if (password.Length == 0)
+            {
+                _hafniaState.Text = "Type the gateway password first.";
+                return;
+            }
+            _connectButton.IsEnabled = false;
+            _hafniaState.Text = "Connecting to " + HafniaGatewayClient.Address + " ...";
+            try
+            {
+                if (_gateway == null)
+                {
+                    _gateway = new HafniaGatewayClient();
+                }
+                await _gateway.LoginAsync("administrator", password);
+                password = null;
+
+                _promptId = await _gateway.FindPromptIdAsync(PromptTitle);
+                if (_promptId == null)
+                {
+                    _hafniaState.Text = "Connected, but the gateway has no saved prompt titled '" + PromptTitle + "'. See hafnia/README.md.";
+                    return;
+                }
+                _hafniaState.Text = "Connected. " + DescribeQuota(await _gateway.GetQuotaAsync());
+            }
+            catch (Exception ex)
+            {
+                _hafniaState.Text = "Connection failed: " + ex.Message;
+                EnvironmentManager.Instance.Log(true, "ScenarioLab", "Hafnia connect failed: " + ex);
+            }
+            finally
+            {
+                _connectButton.IsEnabled = true;
+                UpdateHafniaControls();
+            }
+        }
+
+        /// <summary>
+        /// Sends ONE Hafnia request: the detection question (+ keyword instruction) about 30 seconds of the selected
+        /// camera around the picked frame, then reads the answer every 3 seconds (reading is free) until it is done.
+        /// </summary>
+        private async void OnRunTest(object sender, RoutedEventArgs e)
+        {
+            if (_testRunning || _selectedCamera == null || _gateway == null || _promptId == null)
+            {
+                return;
+            }
+            string question = _detectionQuestion.Text.Trim();
+            if (question.Length == 0)
+            {
+                _runProgress.Text = "Write a detection question first.";
+                return;
+            }
+
+            // Clip window: 30 s centred on the picked frame, ending at least 5 s ago (it must already be recorded).
+            DateTime center = _shownFrame != null ? _shownFrame.TimeUtc : DateTime.UtcNow;
+            DateTime startUtc = center.AddSeconds(-ClipSeconds / 2);
+            DateTime endUtc = center.AddSeconds(ClipSeconds / 2);
+            DateTime latest = DateTime.UtcNow.AddSeconds(-5);
+            if (endUtc > latest)
+            {
+                endUtc = latest;
+                startUtc = endUtc.AddSeconds(-ClipSeconds);
+            }
+
+            var expectedItem = _expectedBox.SelectedItem as ComboBoxItem;
+            var run = new TestRun
+            {
+                Time = DateTime.Now.ToString("HH:mm:ss"),
+                Camera = _selectedCamera.Name,
+                Clip = startUtc.ToString("HH:mm:ss") + "–" + endUtc.ToString("HH:mm:ss") + " UTC",
+                Expected = expectedItem != null ? (string)expectedItem.Tag : "detect",
+                Got = "sending…",
+                Result = "",
+                Question = question,
+                StartUtc = startUtc,
+                EndUtc = endUtc
+            };
+            // XProtect camera ID = the camera item's ObjectId (the same ID the REST API and MilestonePSTools show).
+            string cameraId = _selectedCamera.FQID.ObjectId.ToString("D").ToUpperInvariant();
+
+            _testRunning = true;
+            UpdateHafniaControls();
+            _runs.Insert(0, run);
+            _runsGrid.SelectedItem = run;
+
+            try
+            {
+                // Quota guard: read today's count (free) and refuse above the cap.
+                Quota quota = await _gateway.GetQuotaAsync();
+                if (quota != null && quota.Used >= DailyRequestCap)
+                {
+                    FinishRun(run, "not sent", "", "Not sent: " + quota.Used + " of " + quota.Limit + " requests used today (cap " + DailyRequestCap + ").");
+                    return;
+                }
+
+                Summary summary = await _gateway.CreateSummaryAsync(_promptId, question + "\n" + KeywordInstruction, cameraId, startUtc, endUtc);
+                run.RequestId = summary.Id;
+
+                DateTime deadline = DateTime.UtcNow.AddMinutes(10);   // kit: stop waiting after 10 minutes
+                while (!summary.IsFinished && DateTime.UtcNow < deadline)
+                {
+                    if (_closed)
+                    {
+                        return;   // panel closed: the request finishes on the gateway; its answer is in History
+                    }
+                    run.Got = Describe(summary.Progress);
+                    _runProgress.Text = run.Camera + ", " + run.Clip + ": " + run.Got;
+                    _runsGrid.Items.Refresh();
+                    await Task.Delay(TimeSpan.FromSeconds(3));
+                    summary = await _gateway.GetSummaryAsync(summary.Id);
+                }
+
+                if (summary.Progress == "Completed")
+                {
+                    string got = Verdict(summary.Response);
+                    string result = got == "unclear" ? "?" : (got == "detected") == (run.Expected == "detect") ? "PASS" : "FAIL";
+                    FinishRun(run, got, result, summary.Response);
+                }
+                else if (summary.Progress == "Failed")
+                {
+                    FinishRun(run, "failed", "?", "The request failed: " + summary.LastError);
+                }
+                else
+                {
+                    FinishRun(run, "no answer yet", "?", "Still running after 10 minutes: see Summarization, History in Smart Client.");
+                }
+                _hafniaState.Text = "Connected. " + DescribeQuota(await _gateway.GetQuotaAsync());
+            }
+            catch (Exception ex)
+            {
+                FinishRun(run, "error", "?", ex.Message);
+                if (!_gateway.IsLoggedIn)
+                {
+                    _hafniaState.Text = "Session ended: press Connect again.";
+                }
+                EnvironmentManager.Instance.Log(true, "ScenarioLab", "Hafnia test failed: " + ex);
+            }
+            finally
+            {
+                _testRunning = false;
+                if (!_closed)
+                {
+                    UpdateHafniaControls();
+                }
+            }
+        }
+
+        /// <summary>Writes the outcome into the row, shows it, and appends it to C:\ScenarioLab\runs.jsonl.</summary>
+        private void FinishRun(TestRun run, string got, string result, string answer)
+        {
+            run.Got = got;
+            run.Result = result;
+            run.Answer = answer;
+            if (!_closed)
+            {
+                _runsGrid.Items.Refresh();
+                _runsGrid.SelectedItem = run;
+                _hafniaAnswer.Text = answer;
+                _runProgress.Text = run.Camera + ", " + run.Clip + ": " + got + (result.Length > 0 ? "  →  " + result : "");
+            }
+            try
+            {
+                var line = new JavaScriptSerializer().Serialize(new Dictionary<string, object>
+                {
+                    { "local_time", run.Time }, { "camera", run.Camera },
+                    { "start_utc", run.StartUtc.ToString("o") }, { "end_utc", run.EndUtc.ToString("o") },
+                    { "question", run.Question }, { "expected", run.Expected }, { "got", got }, { "result", result },
+                    { "request_id", run.RequestId }, { "answer", answer }
+                });
+                File.AppendAllText(RunLogPath, line + Environment.NewLine, Encoding.UTF8);
+            }
+            catch (Exception ex)
+            {
+                EnvironmentManager.Instance.Log(true, "ScenarioLab", "Could not write " + RunLogPath + ": " + ex.Message);
+            }
+        }
+
+        private void OnRunSelected(object sender, SelectionChangedEventArgs e)
+        {
+            var run = _runsGrid.SelectedItem as TestRun;
+            if (run != null)
+            {
+                _hafniaAnswer.Text = run.Answer ?? ("Question: " + run.Question + "\nClip: " + run.Camera + ", " + run.Clip);
+            }
+        }
+
+        /// <summary>
+        /// Reads the keyword the way the gateway rule does: a whole word, ignoring case. "_" is part of a word, so
+        /// SCENARIO_NOT_DETECTED never counts as SCENARIO_DETECTED.
+        /// </summary>
+        private static string Verdict(string answer)
+        {
+            if (string.IsNullOrEmpty(answer))
+            {
+                return "unclear";
+            }
+            if (Regex.IsMatch(answer, @"\bSCENARIO_DETECTED\b", RegexOptions.IgnoreCase))
+            {
+                return "detected";
+            }
+            if (Regex.IsMatch(answer, @"\bSCENARIO_NOT_DETECTED\b", RegexOptions.IgnoreCase))
+            {
+                return "not detected";
+            }
+            return "unclear";
+        }
+
+        private static string Describe(string progress)
+        {
+            switch (progress)
+            {
+                case "NotStarted": return "queued";
+                case "FetchingVideo": return "exporting the clip from XProtect";
+                case "TransferringAssets": return "uploading the clip";
+                case "RequestingSummary": return "waiting for Hafnia VLM";
+                default: return progress ?? "…";
+            }
+        }
+
+        private static string DescribeQuota(Quota quota)
+        {
+            return quota == null
+                ? "Today's allowance is not available right now."
+                : quota.Used + " of " + quota.Limit + " Hafnia requests used today (resets 00:00 UTC).";
         }
 
         #endregion

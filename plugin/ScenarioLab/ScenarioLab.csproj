@@ -40,6 +40,9 @@
     <Reference Include="System" />
     <Reference Include="System.Core" />
     <Reference Include="System.Drawing" />
+    <Reference Include="System.Net.Http" />
+    <!-- JavaScriptSerializer: built-in JSON, no extra NuGet package next to Smart Client's own -->
+    <Reference Include="System.Web.Extensions" />
     <Reference Include="System.Windows.Forms" />
     <Reference Include="System.Xaml" />
     <Reference Include="WindowsBase" />
@@ -53,6 +56,8 @@
     <Compile Include="Client\ScenarioLabViewItemPlugin.cs" />
     <Compile Include="Client\ScenarioLabViewItemManager.cs" />
     <Compile Include="Client\RecordedFrameFetcher.cs" />
+    <Compile Include="Client\TestRun.cs" />
+    <Compile Include="Hafnia\HafniaGatewayClient.cs" />
     <Compile Include="Client\ScenarioLabViewItemWpfUserControl.xaml.cs">
       <DependentUpon>ScenarioLabViewItemWpfUserControl.xaml</DependentUpon>
     </Compile>

@@ -29,6 +29,8 @@ Smart Client loads `plugin.def`, which names `ScenarioLab.dll` and says "load in
 | `Client/ScenarioLabViewItemWpfUserControl.xaml` | The panel's layout (WPF, Windows Presentation Foundation) | an HTML template |
 | `Client/ScenarioLabViewItemWpfUserControl.xaml.cs` | The panel's code: cameras, live view, frame picker, snapshot, clips | the view's event handlers |
 | `Client/RecordedFrameFetcher.cs` | Reads recorded frames from XProtect on a background thread | a worker thread with a "latest request wins" queue |
+| `Client/TestRun.cs` | One row of the test table (question, clip, expected, got) | a dataclass |
+| `Hafnia/HafniaGatewayClient.cs` | Calls the Hafnia gateway REST API (login, allowance, prompt lookup, ask, read answer) | a small `requests` wrapper |
 
 Life cycle: Smart Client calls `Init()` after login (or when the panel appears) and `Close()` at logout (or when
 it disappears). Everything acquired in `Init()` is released in `Close()`.
@@ -44,9 +46,16 @@ it disappears). Everything acquired in `Init()` is released in `Close()`.
 3. **Scenario:** saves the text as `<snapshot>.scenario.txt` next to the snapshot: the hand-off to video generation.
 4. **Generated clips:** lists and plays video files placed in `C:\ScenarioLab\clips` (until clips can be loaded
    into XProtect as recordings).
-5. **Hafnia results:** placeholder.
+5. **Test with Hafnia:** connect with the gateway password (kept in memory only), write a detection question,
+   choose whether the clip *should* or *should not* trigger it, and press **Run test on picked moment**. The plug-in
+   sends one request to the Hafnia gateway (30 seconds of the selected camera around the picked frame, the question
+   plus a fixed keyword instruction, and the saved prompt *Scenario Lab*'s ID), waits for the answer and shows
+   expected vs. got (PASS / FAIL). A "detected" answer also raises the XProtect alarm *Scenario Lab: scenario
+   detected* through the gateway rule. Every test is appended to `C:\ScenarioLab\runs.jsonl`. Setup and names:
+   `hafnia/README.md`.
 
-**It sends no Hafnia requests and raises no XProtect events.**
+**Hafnia requests:** only from the **Run test** button, one per click, never in a loop, and refused once 450 of the
+500 daily requests are used.
 
 ## Where the code comes from
 

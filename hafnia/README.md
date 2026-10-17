@@ -22,6 +22,38 @@ Keep these names in sync with `plugin/` and `xprotect-setup/`.
 **Safety:** nothing may use the analytics event *Scenario Lab detection* to start a Hafnia request (that loops until
 the 500 daily requests are gone). Each test is one button press, one request per clip.
 
+## Verified on p043 (17 Oct 2026)
+
+One request through the gateway API page (Swagger) on the `vandalism` camera, with the saved prompt's `PromptId` but a
+**different question** (window/throwing) from the saved text (fence):
+
+- Hafnia answered the question we sent, not the saved one: the gateway uses the sent `Prompt` text.
+- The answer ended with `SCENARIO_DETECTED`; the gateway rule raised *Scenario Lab detection*, and the alarm
+  *Scenario Lab: scenario detected* appeared in Alarm Manager. It took a while (minutes) to show up.
+- Smart Client's History adds "This summary is AI-generated:" in front of the answer when copying; the API's
+  `Response` field does not contain it.
+
+The exact request and answer (camera ID is specific to this machine):
+
+```json
+{
+  "Id": "bf2b54bf-c230-4045-b930-6d483ec19a81",
+  "CreationTimeUtc": "2026-10-17T15:37:09.852+00:00",
+  "LastUpdatedTimeUtc": "2026-10-17T15:37:15.493+00:00",
+  "Request": {
+    "PromptId": "41626fc5-b9b7-40ea-a2b5-9bd57550ddea",
+    "Prompt": "Is someone throwing an object at a building or breaking a window in this video?\nFirst describe in one or two sentences what happens in the clip. Then, on the last line, write exactly one word: SCENARIO_DETECTED if this happens in the clip, SCENARIO_NOT_DETECTED if it does not.",
+    "VideoUris": [
+      "xprotect://localhost/cameras/6B2A2E48-4054-42A7-A660-F5A3EC9B63B8?StartTime=2026-10-17T15:33:15Z&EndTime=2026-10-17T15:33:45Z"
+    ],
+    "AiModelId": "traffic-general"
+  },
+  "Source": { "Trigger": "Manual" },
+  "Progress": "Completed",
+  "Response": "A man in black clothing repeatedly throws a small object toward a building, striking the glass of a window and causing it to shatter. The broken window remains visibly damaged as he continues his actions. SCENARIO_DETECTED"
+}
+```
+
 ## Names
 
 | Thing | Where | Name / value |

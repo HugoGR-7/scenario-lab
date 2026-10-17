@@ -33,7 +33,7 @@
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="240"/>
             <ColumnDefinition Width="*"/>
-            <ColumnDefinition Width="360"/>
+            <ColumnDefinition Width="420"/>
         </Grid.ColumnDefinitions>
 
         <!-- 1. Cameras -->
@@ -139,11 +139,50 @@
                 <TextBlock Style="{StaticResource Hint}"
                            Text="Local files for now. Later these will be XProtect recordings of the generated clips."/>
 
-                <TextBlock Style="{StaticResource StepHeader}" Text="5. Hafnia results" Margin="0,18,0,6"/>
-                <Border BorderThickness="1" BorderBrush="#40808080" Padding="8">
-                    <TextBlock TextWrapping="Wrap" Opacity="0.8"
-                               Text="Not connected in this build: no Hafnia requests are sent. Answers and alarms will appear here."/>
+                <!-- 5. Test a detection question with Hafnia VLM -->
+                <TextBlock Style="{StaticResource StepHeader}" Text="5. Test with Hafnia" Margin="0,18,0,6"/>
+                <DockPanel>
+                    <Button DockPanel.Dock="Right" Padding="10,4" Margin="6,0,0,0" x:Name="_connectButton"
+                            Content="Connect" Click="OnConnectHafnia"/>
+                    <PasswordBox x:Name="_gatewayPassword" VerticalContentAlignment="Center"
+                                 ToolTip="Hafnia gateway password (administrator = your Windows password). Kept in memory only."/>
+                </DockPanel>
+                <TextBlock x:Name="_hafniaState" Style="{StaticResource Hint}"
+                           Text="Not connected. Type the gateway password (your Windows password) and press Connect. It is never saved."/>
+
+                <TextBlock Text="Detection question" Margin="0,10,0,2"/>
+                <TextBox x:Name="_detectionQuestion" Height="60" AcceptsReturn="True" TextWrapping="Wrap"
+                         VerticalScrollBarVisibility="Auto"
+                         Text="Is someone throwing an object at a building or breaking a window in this video?"/>
+                <DockPanel Margin="0,6,0,0">
+                    <ComboBox DockPanel.Dock="Right" x:Name="_expectedBox" Width="150" Margin="6,0,0,0"
+                              ToolTip="What should happen on this clip? Used for PASS / FAIL.">
+                        <ComboBoxItem Content="Should detect" Tag="detect" IsSelected="True"/>
+                        <ComboBoxItem Content="Should NOT detect" Tag="no detect"/>
+                    </ComboBox>
+                    <Button x:Name="_runTestButton" Padding="10,4" Content="Run test on picked moment" IsEnabled="False"
+                            HorizontalAlignment="Left" Click="OnRunTest"/>
+                </DockPanel>
+                <TextBlock Style="{StaticResource Hint}"
+                           Text="1 Hafnia request per click: the selected camera, 30 seconds around the picked frame."/>
+                <TextBlock x:Name="_runProgress" Margin="0,6,0,0" TextWrapping="Wrap"/>
+
+                <DataGrid x:Name="_runsGrid" Height="150" Margin="0,8,0,0" AutoGenerateColumns="False" IsReadOnly="True"
+                          HeadersVisibility="Column" SelectionMode="Single" SelectionChanged="OnRunSelected">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="Time" Binding="{Binding Time}"/>
+                        <DataGridTextColumn Header="Camera" Binding="{Binding Camera}"/>
+                        <DataGridTextColumn Header="Expected" Binding="{Binding Expected}"/>
+                        <DataGridTextColumn Header="Got" Binding="{Binding Got}"/>
+                        <DataGridTextColumn Header="Result" Binding="{Binding Result}"/>
+                    </DataGrid.Columns>
+                </DataGrid>
+                <Border BorderThickness="1" BorderBrush="#40808080" Padding="8" Margin="0,8,0,0">
+                    <TextBlock x:Name="_hafniaAnswer" TextWrapping="Wrap" Opacity="0.9"
+                               Text="Hafnia's answer to the selected test appears here."/>
                 </Border>
+                <TextBlock Style="{StaticResource Hint}"
+                           Text="'detected' also raises the XProtect alarm 'Scenario Lab: scenario detected' through the gateway rule. It can take a few minutes to appear in Alarm Manager."/>
             </StackPanel>
         </ScrollViewer>
 
