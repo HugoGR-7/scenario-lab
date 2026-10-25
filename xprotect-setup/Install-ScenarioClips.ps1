@@ -194,12 +194,17 @@ if ($Step -in 'All', 'Cameras', 'Inspect') {
     if (-not $reference) { throw "Reference hardware '$ReferenceHardware' not found (Get-VmsHardware | Select Name, Address)." }
     $refSettings = Get-RawSettings $reference
     # The setting that holds the clip file is the one whose value is the reference camera's clip name.
-    $fileKey = $refSettings.Keys | Where-Object { "$($refSettings[$_])" -like "*$ReferenceHardware*" } | Select-Object -First 1
-    if (-not $fileKey) { throw "Could not tell which setting holds the clip file. Run -Step Inspect and set it by hand." }
+    # Settings that hold the clip file: every one whose value is the reference camera's clip name. On p043 that is
+    # hardware/VideoH264Files (Management Client's "102 VideoH264Files") and hardware/FileName.
+    $fileKeys = @($refSettings.Keys | Where-Object { "$($refSettings[$_])" -like "*$ReferenceHardware*" } | ForEach-Object { Get-ShortKey $_ })
+    if ($fileKeys.Count -eq 0) { throw "Could not tell which setting holds the clip file. Run -Step Inspect and set it by hand." }
+    # Only these are copied from Milestone's camera; everything else stays at the new device's defaults. Never copy
+    # identity settings such as MacAddress or SerialNumber.
+    $copyKeys = @('hardware/FPS', 'hardware/VideoCodec', 'hardware/Codec')
 }
 
 if ($Step -eq 'Inspect') {
-    Write-Host "Settings of '$ReferenceHardware' (read only). Clip file setting: $fileKey" -ForegroundColor Cyan
+    Write-Host "Settings of '$ReferenceHardware' (read only). Clip file setting(s): $($fileKeys -join ', ')" -ForegroundColor Cyan
     Show-Settings $refSettings
     $ours = Get-VmsHardware | Where-Object { $_.Address -match ':(\d+)/?$' -and [int]$Matches[1] -ge 200 }
     foreach ($hw in $ours) {
@@ -259,11 +264,11 @@ if ($Step -in 'All', 'Cameras') {
             $short = Get-ShortKey $key
             if (-not $freshKeys.ContainsKey($short)) { continue }
             $target = $freshKeys[$short]
-            if ($key -eq $fileKey) { $changes[$target] = [IO.Path]::GetFileName($clip.file); continue }
-            if ("$($fresh[$target])" -ne "$($refSettings[$key])") { $changes[$target] = $refSettings[$key] }
+            if ($fileKeys -contains $short) { $changes[$target] = [IO.Path]::GetFileName($clip.file) }
+            elseif ($copyKeys -contains $short -and "$($fresh[$target])" -ne "$($refSettings[$key])") { $changes[$target] = $refSettings[$key] }
         }
-        if (-not $freshKeys.ContainsKey((Get-ShortKey $fileKey))) {
-            Write-Warning "  The new device has no '$(Get-ShortKey $fileKey)' setting: set the clip file by hand."
+        foreach ($short in $fileKeys) {
+            if (-not $freshKeys.ContainsKey($short)) { Write-Warning "  The new device has no '$short' setting: set the clip file by hand." }
         }
         try {
             Set-RawSettings $hw $changes
