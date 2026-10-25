@@ -56,7 +56,8 @@
     <Compile Include="Client\ScenarioLabViewItemPlugin.cs" />
     <Compile Include="Client\ScenarioLabViewItemManager.cs" />
     <Compile Include="Client\RecordedFrameFetcher.cs" />
-    <Compile Include="Client\TestRun.cs" />
+    <Compile Include="Client\Scenario.cs" />
+    <Compile Include="Client\ScenarioFiles.cs" />
     <Compile Include="Hafnia\HafniaGatewayClient.cs" />
     <Compile Include="Client\ScenarioLabViewItemWpfUserControl.xaml.cs">
       <DependentUpon>ScenarioLabViewItemWpfUserControl.xaml</DependentUpon>

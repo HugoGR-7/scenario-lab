@@ -16,9 +16,9 @@ cameras**, to rare situations specific to their domain, before those situations 
 | Folder | Contents |
 |---|---|
 | `plugin/` | C# MIP (Milestone Integration Platform) Smart Client plug-in: the "Scenario Lab" workspace tab |
-| `xprotect-setup/` | MilestonePSTools / REST scripts that recreate events, rules, alarms and webhooks on a fresh machine |
+| `xprotect-setup/` | MilestonePSTools scripts: load generated clips as StableFPS cameras (`Install-ScenarioClips.ps1`); later events, rules and alarms |
 | `hafnia/` | Exported Hafnia prompts, the system prompt text, gateway rule definitions |
-| `scripts/` | Build, deploy and environment-check scripts |
+| `scripts/` | Build, deploy and environment-check scripts; `convert_clips.py` (MP4 → StableFPS clip) |
 | `docs/` | Architecture notes and setup guide |
 
 ## Build requirements (Windows, on the XProtect machine)

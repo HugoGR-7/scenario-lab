@@ -25,39 +25,53 @@ using Message = VideoOS.Platform.Messaging.Message;
 namespace ScenarioLab.Client
 {
     /// <summary>
-    /// Code for the Scenario Lab panel (layout in the .xaml file).
+    /// Code for the Scenario Lab panel (layout in the .xaml file). Two pages:
     ///
-    /// What works in this build:
+    /// Page 1, "Snapshot &amp; scenarios":
     ///   1. lists XProtect's cameras;
-    ///   2. shows live video of the selected camera; a slider and frame-step buttons pick a recorded frame (original
-    ///      resolution, read from XProtect's recordings), which is saved as the snapshot;
-    ///   3. saves a scenario text next to the snapshot;
-    ///   4. lists and plays local clip files from C:\ScenarioLab\clips;
-    ///   5. tests a detection question with Hafnia VLM on the picked moment (one request per click) and shows
-    ///      expected vs. got; a "detected" answer also raises the XProtect alarm through the gateway rule.
-    /// Placeholder: scenario suggestions.
+    ///   2. live view of the selected camera; a slider and frame-step buttons pick a recorded frame (original
+    ///      resolution, read from XProtect's recordings), saved as the snapshot;
+    ///   3. loads the scenario suggestions prepared from that snapshot (C:\ScenarioLab\suggestions\&lt;camera&gt;_scenarios.json),
+    ///      shows them as a checklist, lets the user add their own, and saves the ticked ones to
+    ///      &lt;camera&gt;_scenarios_user.json: the input for video generation.
+    /// Page 2, "Generated clips &amp; Hafnia test":
+    ///   4. each saved scenario next to the XProtect camera that plays its generated clip (found by name), plus a
+    ///      control row (the snapshot camera at the snapshot moment); clicking a row shows that camera live;
+    ///   5. one detection question tested with Hafnia VLM on every clip (one request per clip), expected vs. got;
+    ///      a "detected" answer also raises the XProtect alarm through the gateway rule.
     ///
-    /// Hafnia requests: only from the "Run test" button, one per click, never in a loop, capped below the daily 500.
+    /// Hafnia requests: only from the Run buttons, one request per clip, capped below the daily 500.
     /// XProtect calls follow Milestone's samples: "Smart Client Workspace" (camera list), "Video Preview"
     /// (ImageViewerWpfControl), "Video Replay" and "RGB Video Enhancement" (BitmapVideoSource, see RecordedFrameFetcher).
     /// </summary>
     public partial class ScenarioLabViewItemWpfUserControl : ViewItemWpfUserControl
     {
         private static readonly string SnapshotFolder = Path.Combine(ScenarioLabDefinition.DataFolder, "snapshots");
-        private static readonly string ClipFolder = Path.Combine(ScenarioLabDefinition.DataFolder, "clips");
-        private static readonly string[] ClipExtensions = { ".mp4", ".mov", ".avi", ".wmv", ".mkv" };
 
-        private ImageViewerWpfControl _imageViewer;   // XProtect's live video control
+        private ImageViewerWpfControl _imageViewer;   // page 1: XProtect's live video control
         private bool _viewerConnected;
         private Item _selectedCamera;                 // an XProtect configuration item of kind Camera
+        private List<Item> _allCameras = new List<Item>();
+
+        private ImageViewerWpfControl _clipViewer;    // page 2: live view of the selected scenario's camera
+        private bool _clipViewerConnected;
 
         private RecordedFrameFetcher _fetcher;        // reads recorded frames on a background thread
         private RecordedFrame _shownFrame;            // the recorded frame currently shown (we own its Bitmap)
         private DateTime _anchorUtc;                  // slider value 0 = this moment
         private bool _movingSliderFromCode;           // true while code (not the user) moves the slider
 
-        private string _lastSnapshotPath;
-        private DateTime _lastSnapshotFrameUtc;
+        // Static = shared by the whole Smart Client process, so switching tabs (which recreates this panel) keeps
+        // the snapshot, the scenarios, the gateway session and the results. Memory only: gone when Smart Client closes.
+        private static int _page = 1;
+        private static string _lastSnapshotPath;
+        private static DateTime _lastSnapshotFrameUtc;
+        private static string _lastSnapshotCamera;
+        private static string _suggestionsPath;                                        // file the checklist came from
+        private static readonly ObservableCollection<Scenario> _suggestions = new ObservableCollection<Scenario>();
+        private static ScenarioSelection _selection;                                   // what page 2 shows
+        private static string _selectionPath;
+        private static readonly ObservableCollection<Scenario> _rows = new ObservableCollection<Scenario>();
 
         // ---- 5. Test with Hafnia ----
         private const string PromptTitle = "Scenario Lab";   // saved prompt on the gateway (hafnia/README.md)
@@ -65,14 +79,11 @@ namespace ScenarioLab.Client
             "First describe in one or two sentences what happens in the clip. Then, on the last line, write exactly one word: "
             + "SCENARIO_DETECTED if this happens in the clip, SCENARIO_NOT_DETECTED if it does not.";
         private const int DailyRequestCap = 450;              // refuse to send above this (the allowance is 500 a day)
-        private const int ClipSeconds = 30;
+        private const int RecordingLagSeconds = 5;            // the clip window ends at least this long ago (already recorded)
         private static readonly string RunLogPath = Path.Combine(ScenarioLabDefinition.DataFolder, "runs.jsonl");
 
-        // Static = shared by the whole Smart Client process, so switching tabs keeps the gateway session and the
-        // test table. Memory only: gone when Smart Client closes. The password itself is never kept.
-        private static HafniaGatewayClient _gateway;
+        private static HafniaGatewayClient _gateway;          // the password itself is never kept
         private static string _promptId;
-        private static readonly ObservableCollection<TestRun> _runs = new ObservableCollection<TestRun>();
         private static bool _testRunning;
         private bool _closed;
         private object _themeChangedReceiver;
@@ -90,17 +101,14 @@ namespace ScenarioLab.Client
             try
             {
                 Directory.CreateDirectory(SnapshotFolder);
-                Directory.CreateDirectory(ClipFolder);
+                Directory.CreateDirectory(ScenarioFiles.SuggestionsFolder);
 
                 // As in Milestone's Video Preview sample: pass this view item's WindowInformation so the viewer
-                // follows Smart Client's live/playback mode.
-                _imageViewer = new ImageViewerWpfControl(WindowInformation)
-                {
-                    HorizontalAlignment = HorizontalAlignment.Stretch,
-                    VerticalAlignment = VerticalAlignment.Stretch,
-                    MinWidth = 100
-                };
+                // follows Smart Client's live/playback mode. One viewer per page.
+                _imageViewer = NewViewer();
                 _liveViewHost.Children.Add(_imageViewer);
+                _clipViewer = NewViewer();
+                _clipViewHost.Children.Add(_clipViewer);
 
                 _fetcher = new RecordedFrameFetcher();
                 _fetcher.FrameReady += OnFrameReadyFromFetcher;
@@ -112,14 +120,25 @@ namespace ScenarioLab.Client
                 // Client themes", MessageId.SmartClient.ThemeChangedIndication).
                 _themeChangedReceiver = EnvironmentManager.Instance.RegisterReceiver(OnThemeChanged,
                     new MessageIdFilter(MessageId.SmartClient.ThemeChangedIndication));
-                _runsGrid.ItemsSource = _runs;
+
+                _suggestionList.ItemsSource = _suggestions;
+                _scenarioGrid.ItemsSource = _rows;
                 if (_gateway != null && _gateway.IsLoggedIn)
                 {
                     _hafniaState.Text = "Connected to the Hafnia gateway.";
                 }
 
                 LoadCameras();
-                LoadClips();
+                RestorePage1State();
+                if (_selection == null)
+                {
+                    TryLoadLatestSelection();   // e.g. after restarting Smart Client: page 2 works straight away
+                }
+                else
+                {
+                    ShowSelection();
+                }
+                ShowPage(_page);
                 UpdateHafniaControls();
                 SetStatus("Ready. Data folder: " + ScenarioLabDefinition.DataFolder);
             }
@@ -127,6 +146,16 @@ namespace ScenarioLab.Client
             {
                 ReportError("Init", ex);
             }
+        }
+
+        private ImageViewerWpfControl NewViewer()
+        {
+            return new ImageViewerWpfControl(WindowInformation)
+            {
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                VerticalAlignment = VerticalAlignment.Stretch,
+                MinWidth = 100
+            };
         }
 
         /// <summary>Called when the panel is no longer shown (tab closed, logout). Free everything here.</summary>
@@ -140,9 +169,6 @@ namespace ScenarioLab.Client
             }
             try
             {
-                _player.Stop();
-                _player.Close();
-
                 if (_fetcher != null)
                 {
                     _fetcher.FrameReady -= OnFrameReadyFromFetcher;
@@ -152,18 +178,19 @@ namespace ScenarioLab.Client
                 }
                 ReplaceShownFrame(null);
 
-                if (_imageViewer != null)
+                DisconnectLiveView();
+                DisconnectClipView();
+                // Milestone's reference: call Close() and Dispose() once completely done with a viewer.
+                foreach (var viewer in new[] { _imageViewer, _clipViewer })
                 {
-                    if (_viewerConnected)
+                    if (viewer != null)
                     {
-                        _imageViewer.Disconnect();
-                        _viewerConnected = false;
+                        viewer.Close();
+                        viewer.Dispose();
                     }
-                    // Milestone's reference: call Close() and Dispose() once completely done with the viewer.
-                    _imageViewer.Close();
-                    _imageViewer.Dispose();
-                    _imageViewer = null;
                 }
+                _imageViewer = null;
+                _clipViewer = null;
             }
             catch (Exception ex)
             {
@@ -180,6 +207,60 @@ namespace ScenarioLab.Client
             FireClickEvent();   // tells Smart Client this view item was clicked (selects it), as in the samples
         }
 
+        #region Pages
+
+        private void OnShowPage1(object sender, RoutedEventArgs e)
+        {
+            ShowPage(1);
+        }
+
+        private void OnShowPage2(object sender, RoutedEventArgs e)
+        {
+            ShowPage(2);
+        }
+
+        /// <summary>
+        /// Shows one page and stops the other page's live video: the machine has 4 CPU cores, so we never decode
+        /// video nobody can see.
+        /// </summary>
+        private void ShowPage(int page)
+        {
+            _page = page;
+            _page1.Visibility = page == 1 ? Visibility.Visible : Visibility.Collapsed;
+            _page2.Visibility = page == 2 ? Visibility.Visible : Visibility.Collapsed;
+            _page1Button.FontWeight = page == 1 ? FontWeights.Bold : FontWeights.Normal;
+            _page2Button.FontWeight = page == 2 ? FontWeights.Bold : FontWeights.Normal;
+
+            if (page == 1)
+            {
+                DisconnectClipView();
+                if (_selectedCamera != null)
+                {
+                    ConnectLiveView(_selectedCamera);
+                }
+            }
+            else
+            {
+                DisconnectLiveView();
+                if (_selection == null)
+                {
+                    TryLoadLatestSelection();
+                }
+                MatchCameras();
+                var row = _scenarioGrid.SelectedItem as Scenario;
+                if (row != null)
+                {
+                    ConnectClipView(row.Camera);
+                }
+                else if (_rows.Count > 0)
+                {
+                    _scenarioGrid.SelectedIndex = 0;   // shows the first clip right away
+                }
+            }
+        }
+
+        #endregion
+
         #region 1. Cameras
 
         private void OnRefreshCameras(object sender, RoutedEventArgs e)
@@ -192,7 +273,8 @@ namespace ScenarioLab.Client
             var cameras = new List<Item>();
             FindAllCameras(Configuration.Instance.GetItemsByKind(Kind.Camera), cameras);
             // LINQ (Language-Integrated Query) works like Python's sorted(..., key=...).
-            _cameraList.ItemsSource = cameras.OrderBy(c => c.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
+            _allCameras = cameras.OrderBy(c => c.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
+            _cameraList.ItemsSource = _allCameras;
             SetStatus(cameras.Count + " cameras found.");
         }
 
@@ -227,21 +309,8 @@ namespace ScenarioLab.Client
             }
             try
             {
-                if (_viewerConnected)
-                {
-                    _imageViewer.Disconnect();
-                    _viewerConnected = false;
-                }
                 _selectedCamera = camera;
-                _liveViewPlaceholder.Visibility = Visibility.Collapsed;
-
-                // Order from Milestone's reference: set CameraFQID, then Initialize(), then Connect().
-                _imageViewer.CameraFQID = camera.FQID;
-                _imageViewer.EnableVisibleHeader = true;
-                _imageViewer.MaintainImageAspectRatio = true;
-                _imageViewer.Initialize();
-                _imageViewer.Connect();
-                _viewerConnected = true;
+                ConnectLiveView(camera);
 
                 // A different camera: forget the previous camera's frame, and show this one's latest recording.
                 ReplaceShownFrame(null);
@@ -249,13 +318,38 @@ namespace ScenarioLab.Client
                 _framePlaceholder.Visibility = Visibility.Visible;
                 SetFrameControlsEnabled(true);
                 JumpToNow();
-                UpdateHafniaControls();
 
                 SetStatus("Showing " + camera.Name + ".");
             }
             catch (Exception ex)
             {
                 ReportError("Connect to " + camera.Name, ex);
+            }
+        }
+
+        /// <summary>Order from Milestone's reference: set CameraFQID, then Initialize(), then Connect().</summary>
+        private void ConnectLiveView(Item camera)
+        {
+            if (_imageViewer == null)
+            {
+                return;
+            }
+            DisconnectLiveView();
+            _liveViewPlaceholder.Visibility = Visibility.Collapsed;
+            _imageViewer.CameraFQID = camera.FQID;
+            _imageViewer.EnableVisibleHeader = true;
+            _imageViewer.MaintainImageAspectRatio = true;
+            _imageViewer.Initialize();
+            _imageViewer.Connect();
+            _viewerConnected = true;
+        }
+
+        private void DisconnectLiveView()
+        {
+            if (_imageViewer != null && _viewerConnected)
+            {
+                _imageViewer.Disconnect();
+                _viewerConnected = false;
             }
         }
 
@@ -425,8 +519,14 @@ namespace ScenarioLab.Client
 
                 _lastSnapshotPath = path;
                 _lastSnapshotFrameUtc = _shownFrame.TimeUtc;
+                _lastSnapshotCamera = _shownFrame.Camera.Name;
                 _snapshotInfo.Text = "Saved " + _shownFrame.Bitmap.Width + " × " + _shownFrame.Bitmap.Height + " px   " + path;
-                _saveScenarioButton.IsEnabled = true;
+
+                // A new snapshot starts a new list of scenarios.
+                _suggestions.Clear();
+                _suggestionsPath = null;
+                _nextPageButton.IsEnabled = false;
+                RestorePage1State();
                 SetStatus("Snapshot saved: " + path);
             }
             catch (Exception ex)
@@ -442,13 +542,50 @@ namespace ScenarioLab.Client
 
         #endregion
 
-        #region 3. Scenario
+        #region 3. Scenarios (page 1)
+
+        /// <summary>Puts page 1's step 3 back the way it was (the panel is recreated when the user switches tabs).</summary>
+        private void RestorePage1State()
+        {
+            bool hasSnapshot = _lastSnapshotPath != null;
+            bool hasList = _suggestions.Count > 0;
+            _loadSuggestionsButton.IsEnabled = hasSnapshot;
+            _ownScenarioText.IsEnabled = hasList;
+            _ownExpectedBox.IsEnabled = hasList;
+            _addOwnButton.IsEnabled = hasList;
+            _saveSelectionButton.IsEnabled = hasList;
+            _nextPageButton.IsEnabled = _selection != null;
+
+            if (hasSnapshot && _snapshotInfo.Text == "No snapshot yet.")
+            {
+                _snapshotInfo.Text = "Snapshot: " + _lastSnapshotPath;
+            }
+            if (hasList)
+            {
+                _suggestionsInfo.Text = SuggestionsSummary();
+            }
+            else if (hasSnapshot)
+            {
+                string expected = ScenarioFiles.SuggestionsPathFor(_lastSnapshotCamera);
+                _suggestionsInfo.Text = File.Exists(expected)
+                    ? "Suggestions for this view are ready (" + Path.GetFileName(expected) + "). Press Load suggestions."
+                    : "No " + Path.GetFileName(expected) + " yet. Run the scene-analysis step on the snapshot, copy its JSON into the suggestions folder, then press Load suggestions.";
+            }
+        }
+
+        private string SuggestionsSummary()
+        {
+            int suggested = _suggestions.Count(s => s.Source == Scenario.FromSuggestion);
+            int own = _suggestions.Count(s => s.Source == Scenario.FromUser);
+            return suggested + " scenarios suggested for this view by the scene-analysis model (" + Path.GetFileName(_suggestionsPath) + ")"
+                + (own > 0 ? ", " + own + " of your own" : "") + ". Tick the ones to generate.";
+        }
 
         /// <summary>
-        /// Writes the scenario as a text file next to the snapshot (same name, ".scenario.txt"), so the snapshot and
-        /// its scenario can be handed to video generation together.
+        /// Loads C:\ScenarioLab\suggestions\&lt;camera&gt;_scenarios.json for the snapshot's camera. If it is not
+        /// there, lets the user pick the file.
         /// </summary>
-        private void OnSaveScenario(object sender, RoutedEventArgs e)
+        private void OnLoadSuggestions(object sender, RoutedEventArgs e)
         {
             if (_lastSnapshotPath == null)
             {
@@ -456,105 +593,299 @@ namespace ScenarioLab.Client
             }
             try
             {
-                string text = _scenarioText.Text.Trim();
-                if (text.Length == 0)
+                string path = ScenarioFiles.SuggestionsPathFor(_lastSnapshotCamera);
+                if (!File.Exists(path))
                 {
-                    SetStatus("Write a scenario first.");
-                    return;
+                    var dialog = new Microsoft.Win32.OpenFileDialog
+                    {
+                        Title = "Scenario suggestions for " + _lastSnapshotCamera,
+                        InitialDirectory = ScenarioFiles.SuggestionsFolder,
+                        Filter = "Scenario suggestions (*_scenarios.json)|*_scenarios.json|JSON files (*.json)|*.json"
+                    };
+                    if (dialog.ShowDialog() != true)
+                    {
+                        return;
+                    }
+                    path = dialog.FileName;
                 }
-                string path = Path.ChangeExtension(_lastSnapshotPath, ".scenario.txt");
-                var content = new StringBuilder()
-                    .AppendLine("camera: " + _selectedCamera.Name)
-                    .AppendLine("snapshot: " + Path.GetFileName(_lastSnapshotPath))
-                    .AppendLine("frame_utc: " + _lastSnapshotFrameUtc.ToString("o"))
-                    .AppendLine("saved_utc: " + DateTime.UtcNow.ToString("o"))
-                    .AppendLine("scenario:")
-                    .AppendLine(text)
-                    .ToString();
-                File.WriteAllText(path, content, Encoding.UTF8);
-                SetStatus("Scenario saved: " + path);
+
+                List<Scenario> loaded = ScenarioFiles.LoadSuggestions(path);
+                _suggestions.Clear();
+                foreach (Scenario s in loaded)
+                {
+                    _suggestions.Add(s);
+                }
+                _suggestionsPath = path;
+                RestorePage1State();
+                SetStatus("Loaded " + loaded.Count + " suggestions from " + path);
             }
             catch (Exception ex)
             {
-                ReportError("Save scenario", ex);
+                ReportError("Load suggestions", ex);
+            }
+        }
+
+        private void OnOpenSuggestionsFolder(object sender, RoutedEventArgs e)
+        {
+            OpenInExplorer(ScenarioFiles.SuggestionsFolder);
+        }
+
+        /// <summary>Adds the user's own scenario as a new, ticked entry with ID &lt;prefix&gt;_u1, _u2, ...</summary>
+        private void OnAddOwnScenario(object sender, RoutedEventArgs e)
+        {
+            string text = _ownScenarioText.Text.Trim();
+            if (text.Length == 0 || _suggestionsPath == null)
+            {
+                SetStatus("Write your scenario in the box first.");
+                return;
+            }
+            var expectedItem = _ownExpectedBox.SelectedItem as ComboBoxItem;
+            int number = _suggestions.Count(s => s.Source == Scenario.FromUser) + 1;
+            var own = new Scenario
+            {
+                Id = ScenarioFiles.PrefixFromFile(_suggestionsPath) + "_u" + number,
+                Title = text,
+                Category = "user",
+                Where = "",
+                Source = Scenario.FromUser,
+                Expected = expectedItem != null ? (string)expectedItem.Tag : Scenario.Detect,
+                IsSelected = true
+            };
+            _suggestions.Add(own);
+            _ownScenarioText.Clear();
+            _suggestionsInfo.Text = SuggestionsSummary();
+            SetStatus("Added your scenario " + own.Id + ".");
+        }
+
+        /// <summary>
+        /// Writes the ticked scenarios to &lt;prefix&gt;_scenarios_user.json (the input for video generation) and loads
+        /// them into page 2.
+        /// </summary>
+        private void OnSaveSelection(object sender, RoutedEventArgs e)
+        {
+            if (_suggestionsPath == null)
+            {
+                return;
+            }
+            var ticked = _suggestions.Where(s => s.IsSelected).ToList();
+            if (ticked.Count == 0)
+            {
+                SetStatus("Tick at least one scenario first.");
+                return;
+            }
+            try
+            {
+                var selection = new ScenarioSelection
+                {
+                    Camera = _lastSnapshotCamera,
+                    Snapshot = _lastSnapshotPath,
+                    SnapshotUtc = _lastSnapshotFrameUtc,
+                    SuggestionsFile = Path.GetFileName(_suggestionsPath),
+                    SavedUtc = DateTime.UtcNow,
+                    Scenarios = ticked
+                };
+                string path = ScenarioFiles.SelectionPathFor(_suggestionsPath);
+                ScenarioFiles.SaveSelection(path, selection);
+
+                // Page 2 works on its own copy (read back from the file), so later ticks on page 1 don't change it.
+                ShowSelection(ScenarioFiles.LoadSelection(path), path);
+                _nextPageButton.IsEnabled = true;
+                _selectionInfo.Text = "Saved " + ticked.Count + " scenarios to " + path + ": the input for video generation.";
+                SetStatus("Selection saved: " + path);
+            }
+            catch (Exception ex)
+            {
+                ReportError("Save selection", ex);
             }
         }
 
         #endregion
 
-        #region 4. Generated clips (local files for now)
+        #region 4. Generated clips in XProtect (page 2)
 
-        private void OnRefreshClips(object sender, RoutedEventArgs e)
+        private void OnReloadSelection(object sender, RoutedEventArgs e)
         {
-            LoadClips();
-        }
-
-        private void LoadClips()
-        {
-            var clips = new DirectoryInfo(ClipFolder).GetFiles()
-                .Where(f => ClipExtensions.Contains(f.Extension.ToLowerInvariant()))
-                .OrderBy(f => f.Name)
-                .ToList();
-            _clipList.ItemsSource = clips;
-        }
-
-        private FileInfo SelectedClip => _clipList.SelectedItem as FileInfo;
-
-        private void OnClipSelected(object sender, SelectionChangedEventArgs e)
-        {
-            bool hasClip = SelectedClip != null;
-            _playButton.IsEnabled = hasClip;
-            _stopButton.IsEnabled = hasClip;
-            _openExternalButton.IsEnabled = hasClip;
-            if (hasClip)
+            if (!TryLoadLatestSelection())
             {
-                _player.Stop();
-                _player.Source = new Uri(SelectedClip.FullName);
+                SetStatus("No *_scenarios_user.json in " + ScenarioFiles.SuggestionsFolder + " yet: save a selection on page 1.");
             }
         }
 
-        private void OnPlay(object sender, RoutedEventArgs e)
+        private bool TryLoadLatestSelection()
         {
-            _player.Play();
-        }
-
-        private void OnStop(object sender, RoutedEventArgs e)
-        {
-            _player.Stop();
-        }
-
-        private void OnPlayerEnded(object sender, RoutedEventArgs e)
-        {
-            // Loop the clip, like XProtect's test cameras do.
-            _player.Position = TimeSpan.Zero;
-            _player.Play();
-        }
-
-        private void OnPlayerFailed(object sender, ExceptionRoutedEventArgs e)
-        {
-            // WPF's player relies on Windows media components, which Windows Server may not have.
-            SetStatus("Cannot play this clip inside Smart Client (" + e.ErrorException.Message + "). Use 'Open in player'.");
-            EnvironmentManager.Instance.Log(true, "ScenarioLab", "MediaFailed: " + e.ErrorException);
-        }
-
-        private void OnOpenExternal(object sender, RoutedEventArgs e)
-        {
-            if (SelectedClip != null)
+            try
             {
-                try
+                string path = ScenarioFiles.LatestSelectionPath();
+                if (path == null)
                 {
-                    Process.Start(SelectedClip.FullName);   // opens with the default Windows app for that file type
+                    return false;
                 }
-                catch (Exception ex)
-                {
-                    ReportError("Open clip", ex);
-                }
+                ShowSelection(ScenarioFiles.LoadSelection(path), path);
+                SetStatus("Loaded selection " + path);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                ReportError("Load selection", ex);
+                return false;
             }
         }
 
-        private void OnOpenClipFolder(object sender, RoutedEventArgs e)
+        /// <summary>Fills the test table: one row per chosen scenario, then the control row.</summary>
+        private void ShowSelection(ScenarioSelection selection, string path)
         {
-            OpenInExplorer(ClipFolder);
+            _selection = selection;
+            _selectionPath = path;
+            _rows.Clear();
+            foreach (Scenario s in selection.Scenarios)
+            {
+                _rows.Add(s);
+            }
+            // Control: the snapshot camera itself, from the snapshot moment, where nothing happens.
+            _rows.Add(new Scenario
+            {
+                Id = selection.Camera,
+                Title = "Control: the original camera at the snapshot moment (nothing happens)",
+                Category = "control",
+                Source = Scenario.Control,
+                Expected = Scenario.NoDetect,
+                StartAtUtc = selection.SnapshotUtc
+            });
+            ShowSelection();
+            MatchCameras();
+        }
+
+        /// <summary>Shows the loaded selection's snapshot and summary (also after the panel is recreated).</summary>
+        private void ShowSelection()
+        {
+            if (_selection == null)
+            {
+                return;
+            }
+            _selectionSummary.Text = "Snapshot of " + _selection.Camera + " at " + _selection.SnapshotUtc.ToString("yyyy-MM-dd HH:mm:ss") + " UTC\n"
+                + _selection.Scenarios.Count + " scenarios chosen (" + Path.GetFileName(_selectionPath) + ")";
+            _snapshotThumb.Source = LoadImage(_selection.Snapshot);
+        }
+
+        private static BitmapImage LoadImage(string path)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(path) || !File.Exists(path))
+                {
+                    return null;
+                }
+                var image = new BitmapImage();
+                image.BeginInit();
+                image.CacheOption = BitmapCacheOption.OnLoad;   // read now, so the file is not kept locked
+                image.UriSource = new Uri(path);
+                image.DecodePixelWidth = 336;
+                image.EndInit();
+                image.Freeze();
+                return image;
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+        }
+
+        private void OnMatchCameras(object sender, RoutedEventArgs e)
+        {
+            LoadCameras();
+            MatchCameras();
+        }
+
+        /// <summary>
+        /// Finds each scenario's XProtect camera by name: a camera named exactly like the scenario ID, or starting with
+        /// the ID and "_" or " " (vandalism_s1 matches "vandalism_s1_rock_window", not "vandalism_s10"). The control
+        /// row uses the snapshot's camera, by exact name.
+        /// </summary>
+        private void MatchCameras()
+        {
+            foreach (Scenario row in _rows)
+            {
+                row.Camera = row.Source == Scenario.Control
+                    ? _allCameras.FirstOrDefault(c => string.Equals(c.Name, row.Id, StringComparison.OrdinalIgnoreCase))
+                    : FindCameraFor(row.Id);
+            }
+            _scenarioGrid.Items.Refresh();
+            int found = _rows.Count(r => r.Camera != null);
+            if (_rows.Count > 0)
+            {
+                SetStatus(found + " of " + _rows.Count + " cameras found."
+                    + (found < _rows.Count ? " Missing ones: install their clips (xprotect-setup\\README.md), then press Find cameras again." : ""));
+            }
+            UpdateHafniaControls();
+        }
+
+        private Item FindCameraFor(string id)
+        {
+            if (string.IsNullOrEmpty(id))
+            {
+                return null;
+            }
+            return _allCameras.FirstOrDefault(c =>
+                string.Equals(c.Name, id, StringComparison.OrdinalIgnoreCase)
+                || c.Name.StartsWith(id + "_", StringComparison.OrdinalIgnoreCase)
+                || c.Name.StartsWith(id + " ", StringComparison.OrdinalIgnoreCase));
+        }
+
+        private void OnScenarioRowSelected(object sender, SelectionChangedEventArgs e)
+        {
+            var row = _scenarioGrid.SelectedItem as Scenario;
+            if (row == null)
+            {
+                return;
+            }
+            _hafniaAnswer.Text = row.Answer ?? (row.Camera == null
+                ? "No XProtect camera for this scenario yet. Expected name: " + row.Id + " (or " + row.Id + "_something)."
+                : "Not tested yet.");
+            if (_page == 2)
+            {
+                ConnectClipView(row.Camera);
+            }
+            UpdateHafniaControls();
+        }
+
+        private void ConnectClipView(Item camera)
+        {
+            if (_clipViewer == null)
+            {
+                return;
+            }
+            try
+            {
+                DisconnectClipView();
+                if (camera == null)
+                {
+                    _clipViewPlaceholder.Text = "This scenario has no XProtect camera yet.";
+                    _clipViewPlaceholder.Visibility = Visibility.Visible;
+                    _clipViewer.Visibility = Visibility.Collapsed;
+                    return;
+                }
+                _clipViewer.Visibility = Visibility.Visible;
+                _clipViewPlaceholder.Visibility = Visibility.Collapsed;
+                _clipViewer.CameraFQID = camera.FQID;
+                _clipViewer.EnableVisibleHeader = true;
+                _clipViewer.MaintainImageAspectRatio = true;
+                _clipViewer.Initialize();
+                _clipViewer.Connect();
+                _clipViewerConnected = true;
+            }
+            catch (Exception ex)
+            {
+                ReportError("Show " + camera.Name, ex);
+            }
+        }
+
+        private void DisconnectClipView()
+        {
+            if (_clipViewer != null && _clipViewerConnected)
+            {
+                _clipViewer.Disconnect();
+                _clipViewerConnected = false;
+            }
         }
 
         #endregion
@@ -564,7 +895,21 @@ namespace ScenarioLab.Client
         private void UpdateHafniaControls()
         {
             bool connected = _gateway != null && _gateway.IsLoggedIn && _promptId != null;
-            _runTestButton.IsEnabled = connected && _selectedCamera != null && !_testRunning;
+            var row = _scenarioGrid.SelectedItem as Scenario;
+            int runnable = _rows.Count(r => r.Camera != null);
+            _runSelectedButton.IsEnabled = connected && !_testRunning && row != null && row.Camera != null;
+            _runAllButton.IsEnabled = connected && !_testRunning && runnable > 0;
+            _runAllButton.Content = "Run all (" + runnable + (runnable == 1 ? " request)" : " requests)");
+        }
+
+        private int WindowSeconds
+        {
+            get
+            {
+                var item = _windowBox.SelectedItem as ComboBoxItem;
+                int seconds;
+                return item != null && int.TryParse(item.Tag as string, out seconds) ? seconds : 10;
+            }
         }
 
         /// <summary>Logs in to the gateway (password used once, then forgotten), finds the saved prompt, shows the allowance.</summary>
@@ -610,13 +955,25 @@ namespace ScenarioLab.Client
             }
         }
 
-        /// <summary>
-        /// Sends ONE Hafnia request: the detection question (+ keyword instruction) about 30 seconds of the selected
-        /// camera around the picked frame, then reads the answer every 3 seconds (reading is free) until it is done.
-        /// </summary>
-        private async void OnRunTest(object sender, RoutedEventArgs e)
+        private async void OnRunSelected(object sender, RoutedEventArgs e)
         {
-            if (_testRunning || _selectedCamera == null || _gateway == null || _promptId == null)
+            var row = _scenarioGrid.SelectedItem as Scenario;
+            if (row == null || row.Camera == null)
+            {
+                return;
+            }
+            await RunRowsAsync(new List<Scenario> { row });
+        }
+
+        private async void OnRunAll(object sender, RoutedEventArgs e)
+        {
+            await RunRowsAsync(_rows.Where(r => r.Camera != null).ToList());
+        }
+
+        /// <summary>One Hafnia request per row, one after the other. Stops early if the daily cap is reached.</summary>
+        private async Task RunRowsAsync(List<Scenario> rows)
+        {
+            if (_testRunning || _gateway == null || _promptId == null || rows.Count == 0)
             {
                 return;
             }
@@ -626,90 +983,42 @@ namespace ScenarioLab.Client
                 _runProgress.Text = "Write a detection question first.";
                 return;
             }
-
-            // Clip window: 30 s centred on the picked frame, ending at least 5 s ago (it must already be recorded).
-            DateTime center = _shownFrame != null ? _shownFrame.TimeUtc : DateTime.UtcNow;
-            DateTime startUtc = center.AddSeconds(-ClipSeconds / 2);
-            DateTime endUtc = center.AddSeconds(ClipSeconds / 2);
-            DateTime latest = DateTime.UtcNow.AddSeconds(-5);
-            if (endUtc > latest)
-            {
-                endUtc = latest;
-                startUtc = endUtc.AddSeconds(-ClipSeconds);
-            }
-
-            var expectedItem = _expectedBox.SelectedItem as ComboBoxItem;
-            var run = new TestRun
-            {
-                Time = DateTime.Now.ToString("HH:mm:ss"),
-                Camera = _selectedCamera.Name,
-                Clip = startUtc.ToString("HH:mm:ss") + "–" + endUtc.ToString("HH:mm:ss") + " UTC",
-                Expected = expectedItem != null ? (string)expectedItem.Tag : "detect",
-                Got = "sending…",
-                Result = "",
-                Question = question,
-                StartUtc = startUtc,
-                EndUtc = endUtc
-            };
-            // XProtect camera ID = the camera item's ObjectId (the same ID the REST API and MilestonePSTools show).
-            string cameraId = _selectedCamera.FQID.ObjectId.ToString("D").ToUpperInvariant();
+            int seconds = WindowSeconds;
 
             _testRunning = true;
             UpdateHafniaControls();
-            _runs.Insert(0, run);
-            _runsGrid.SelectedItem = run;
-
             try
             {
-                // Quota guard: read today's count (free) and refuse above the cap.
-                Quota quota = await _gateway.GetQuotaAsync();
-                if (quota != null && quota.Used >= DailyRequestCap)
+                foreach (Scenario row in rows)
                 {
-                    FinishRun(run, "not sent", "", "Not sent: " + quota.Used + " of " + quota.Limit + " requests used today (cap " + DailyRequestCap + ").");
-                    return;
+                    row.ClearResult();
                 }
-
-                Summary summary = await _gateway.CreateSummaryAsync(_promptId, question + "\n" + KeywordInstruction, cameraId, startUtc, endUtc);
-                run.RequestId = summary.Id;
-
-                DateTime deadline = DateTime.UtcNow.AddMinutes(10);   // kit: stop waiting after 10 minutes
-                while (!summary.IsFinished && DateTime.UtcNow < deadline)
+                for (int i = 0; i < rows.Count && !_closed; i++)
                 {
-                    if (_closed)
+                    string prefix = rows.Count > 1 ? "Clip " + (i + 1) + " of " + rows.Count + ", " : "";
+                    bool goOn = await RunOneAsync(rows[i], question, seconds, prefix);
+                    if (!goOn)
                     {
-                        return;   // panel closed: the request finishes on the gateway; its answer is in History
+                        break;
                     }
-                    run.Got = Describe(summary.Progress);
-                    _runProgress.Text = run.Camera + ", " + run.Clip + ": " + run.Got;
-                    _runsGrid.Items.Refresh();
-                    await Task.Delay(TimeSpan.FromSeconds(3));
-                    summary = await _gateway.GetSummaryAsync(summary.Id);
                 }
-
-                if (summary.Progress == "Completed")
+                if (!_closed)
                 {
-                    string got = Verdict(summary.Response);
-                    string result = got == "unclear" ? "?" : (got == "detected") == (run.Expected == "detect") ? "PASS" : "FAIL";
-                    FinishRun(run, got, result, summary.Response);
+                    int pass = rows.Count(r => r.Result == "PASS");
+                    if (rows.Count > 1)
+                    {
+                        _runProgress.Text = "Done: " + pass + " of " + rows.Count + " PASS.";
+                    }
+                    _hafniaState.Text = "Connected. " + DescribeQuota(await _gateway.GetQuotaAsync());
                 }
-                else if (summary.Progress == "Failed")
-                {
-                    FinishRun(run, "failed", "?", "The request failed: " + summary.LastError);
-                }
-                else
-                {
-                    FinishRun(run, "no answer yet", "?", "Still running after 10 minutes: see Summarization, History in Smart Client.");
-                }
-                _hafniaState.Text = "Connected. " + DescribeQuota(await _gateway.GetQuotaAsync());
             }
             catch (Exception ex)
             {
-                FinishRun(run, "error", "?", ex.Message);
-                if (!_gateway.IsLoggedIn)
+                EnvironmentManager.Instance.Log(true, "ScenarioLab", "Hafnia run failed: " + ex);
+                if (!_closed)
                 {
-                    _hafniaState.Text = "Session ended: press Connect again.";
+                    _runProgress.Text = "Stopped: " + ex.Message;
                 }
-                EnvironmentManager.Instance.Log(true, "ScenarioLab", "Hafnia test failed: " + ex);
             }
             finally
             {
@@ -721,42 +1030,114 @@ namespace ScenarioLab.Client
             }
         }
 
-        /// <summary>Writes the outcome into the row, shows it, and appends it to C:\ScenarioLab\runs.jsonl.</summary>
-        private void FinishRun(TestRun run, string got, string result, string answer)
+        /// <summary>
+        /// Sends ONE Hafnia request for one row, then reads the answer every 3 seconds (reading is free) until it is
+        /// done. Clip window: the control row starts at the snapshot moment; a generated clip loops forever on its
+        /// camera, so it uses the latest recorded seconds. Returns false when the run of rows should stop.
+        /// </summary>
+        private async Task<bool> RunOneAsync(Scenario row, string question, int seconds, string progressPrefix)
         {
-            run.Got = got;
-            run.Result = result;
-            run.Answer = answer;
+            DateTime latest = DateTime.UtcNow.AddSeconds(-RecordingLagSeconds);
+            DateTime startUtc = row.StartAtUtc.HasValue ? row.StartAtUtc.Value : latest.AddSeconds(-seconds);
+            DateTime endUtc = startUtc.AddSeconds(seconds);
+            if (endUtc > latest)
+            {
+                endUtc = latest;
+                startUtc = endUtc.AddSeconds(-seconds);
+            }
+
+            row.Question = question;
+            row.StartUtc = startUtc;
+            row.EndUtc = endUtc;
+            row.Got = "sending…";
+            _scenarioGrid.SelectedItem = row;
+            string where = progressPrefix + row.CameraLabel + ", " + startUtc.ToString("HH:mm:ss") + "–" + endUtc.ToString("HH:mm:ss") + " UTC: ";
+
+            try
+            {
+                // Quota guard: read today's count (free) and refuse above the cap.
+                Quota quota = await _gateway.GetQuotaAsync();
+                if (quota != null && quota.Used >= DailyRequestCap)
+                {
+                    FinishRow(row, "not sent", "", "Not sent: " + quota.Used + " of " + quota.Limit + " requests used today (cap " + DailyRequestCap + ").", where);
+                    return false;
+                }
+
+                // XProtect camera ID = the camera item's ObjectId (the same ID the REST API and MilestonePSTools show).
+                string cameraId = row.Camera.FQID.ObjectId.ToString("D").ToUpperInvariant();
+                Summary summary = await _gateway.CreateSummaryAsync(_promptId, question + "\n" + KeywordInstruction, cameraId, startUtc, endUtc);
+                row.RequestId = summary.Id;
+
+                DateTime deadline = DateTime.UtcNow.AddMinutes(10);   // kit: stop waiting after 10 minutes
+                while (!summary.IsFinished && DateTime.UtcNow < deadline)
+                {
+                    if (_closed)
+                    {
+                        return false;   // panel closed: the request finishes on the gateway; its answer is in History
+                    }
+                    row.Got = Describe(summary.Progress);
+                    _runProgress.Text = where + row.Got;
+                    await Task.Delay(TimeSpan.FromSeconds(3));
+                    summary = await _gateway.GetSummaryAsync(summary.Id);
+                }
+
+                if (summary.Progress == "Completed")
+                {
+                    string got = Verdict(summary.Response);
+                    string result = got == "unclear" ? "?" : (got == "detected") == (row.Expected == Scenario.Detect) ? "PASS" : "FAIL";
+                    FinishRow(row, got, result, summary.Response, where);
+                }
+                else if (summary.Progress == "Failed")
+                {
+                    FinishRow(row, "failed", "?", "The request failed: " + summary.LastError, where);
+                }
+                else
+                {
+                    FinishRow(row, "no answer yet", "?", "Still running after 10 minutes: see Summarization, History in Smart Client.", where);
+                }
+                return true;
+            }
+            catch (Exception ex)
+            {
+                FinishRow(row, "error", "?", ex.Message, where);
+                EnvironmentManager.Instance.Log(true, "ScenarioLab", "Hafnia test failed: " + ex);
+                if (!_gateway.IsLoggedIn)
+                {
+                    _hafniaState.Text = "Session ended: press Connect again.";
+                    return false;
+                }
+                return true;
+            }
+        }
+
+        /// <summary>Writes the outcome into the row, shows it, and appends it to C:\ScenarioLab\runs.jsonl.</summary>
+        private void FinishRow(Scenario row, string got, string result, string answer, string where)
+        {
+            row.Got = got;
+            row.Result = result;
+            row.Answer = answer;
             if (!_closed)
             {
-                _runsGrid.Items.Refresh();
-                _runsGrid.SelectedItem = run;
-                _hafniaAnswer.Text = answer;
-                _runProgress.Text = run.Camera + ", " + run.Clip + ": " + got + (result.Length > 0 ? "  →  " + result : "");
+                if (_scenarioGrid.SelectedItem == row)
+                {
+                    _hafniaAnswer.Text = answer;
+                }
+                _runProgress.Text = where + got + (result.Length > 0 ? "  →  " + result : "");
             }
             try
             {
                 var line = new JavaScriptSerializer().Serialize(new Dictionary<string, object>
                 {
-                    { "local_time", run.Time }, { "camera", run.Camera },
-                    { "start_utc", run.StartUtc.ToString("o") }, { "end_utc", run.EndUtc.ToString("o") },
-                    { "question", run.Question }, { "expected", run.Expected }, { "got", got }, { "result", result },
-                    { "request_id", run.RequestId }, { "answer", answer }
+                    { "local_time", DateTime.Now.ToString("s") }, { "scenario_id", row.Id }, { "scenario", row.Title },
+                    { "camera", row.CameraLabel }, { "start_utc", row.StartUtc.ToString("o") }, { "end_utc", row.EndUtc.ToString("o") },
+                    { "question", row.Question }, { "expected", row.Expected }, { "got", got }, { "result", result },
+                    { "request_id", row.RequestId }, { "answer", answer }
                 });
                 File.AppendAllText(RunLogPath, line + Environment.NewLine, Encoding.UTF8);
             }
             catch (Exception ex)
             {
                 EnvironmentManager.Instance.Log(true, "ScenarioLab", "Could not write " + RunLogPath + ": " + ex.Message);
-            }
-        }
-
-        private void OnRunSelected(object sender, SelectionChangedEventArgs e)
-        {
-            var run = _runsGrid.SelectedItem as TestRun;
-            if (run != null)
-            {
-                _hafniaAnswer.Text = run.Answer ?? ("Question: " + run.Question + "\nClip: " + run.Camera + ", " + run.Clip);
             }
         }
 

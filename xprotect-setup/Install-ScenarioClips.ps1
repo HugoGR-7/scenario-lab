@@ -1,0 +1,246 @@
+<#
+Install-ScenarioClips.ps1 - load generated clips into XProtect as StableFPS cameras (one camera per clip).
+
+Run on p043 in PowerShell as Administrator, from the repository folder:
+    powershell -NoProfile -ExecutionPolicy Bypass -File .\xprotect-setup\Install-ScenarioClips.ps1
+    ... -Step Files      only copy the clips and restart the Recording Server
+    ... -Step Cameras    only add the cameras (after Files)
+    ... -Step Inspect    change nothing: print the StableFPS settings of a Milestone camera and of ours
+
+Input: the folder written by scripts/convert_clips.py (default C:\ScenarioLab\stablefps): the raw H.264 files
+(832x480_<camera name>) and clips.json, which lists camera name -> file.
+
+What it does (guides/stablefps-custom-clips.md, confirmed by Milestone support on 22 Oct 2026):
+  Files:   wait until the Recording Server (RS) has run 90 s -> stop it -> copy the clips into StableFPS_Data\Video\H264
+           -> back up StableFPS.xml and change its revision number (that makes the driver re-read its file list)
+           -> start the RS -> wait 2.5 minutes.
+  Cameras: for each clip, add one StableFPS hardware device at 127.0.0.1:<port> (ports 200 and up; 100-199 belong to
+           Milestone), named after the camera; copy the settings Milestone uses on its own clip camera (10 fps, H264)
+           and point the file setting at our clip; name the camera the same; put it in the camera group "Scenario Lab".
+
+Never touches Milestone's 11 cameras: their hardware is only READ, to copy its settings. Safe to run again: clips
+already copied are replaced, cameras that already exist (same name) are skipped.
+#>
+param(
+    [string]$ClipFolder = 'C:\ScenarioLab\stablefps',
+    [ValidateSet('All', 'Files', 'Cameras', 'Inspect')][string]$Step = 'All',
+    [int]$FirstPort = 200,
+    # A Milestone StableFPS camera whose settings we copy (read only).
+    [string]$ReferenceHardware = 'bin_pushed_over_onto_sidewalk',
+    [string]$CameraGroup = 'Scenario Lab'
+)
+$ErrorActionPreference = 'Stop'
+
+if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
+        [Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    throw 'Run PowerShell as Administrator.'
+}
+if ($FirstPort -lt 200) { throw 'Ports below 200 belong to Milestone. Use 200 or higher.' }
+
+# ---------------------------------------------------------------- clips.json
+$manifestPath = Join-Path $ClipFolder 'clips.json'
+if ($Step -ne 'Inspect') {
+    if (-not (Test-Path $manifestPath)) { throw "Not found: $manifestPath (made by scripts/convert_clips.py)." }
+    $clips = @(Get-Content $manifestPath -Raw | ConvertFrom-Json)
+    foreach ($clip in $clips) {
+        if ($clip.camera -notmatch '^[A-Za-z0-9_-]+$') { throw "Bad camera name '$($clip.camera)'." }
+        if (-not (Test-Path (Join-Path $ClipFolder $clip.file))) { throw "Clip file missing: $($clip.file)" }
+    }
+    Write-Host "$($clips.Count) clip(s) in $ClipFolder" -ForegroundColor Cyan
+    $clips | ForEach-Object { Write-Host "  $($_.camera)  <-  $($_.file)" }
+}
+
+# ---------------------------------------------------------------- Files
+function Find-NativeDrivers {
+    foreach ($root in @($env:ProgramFiles, ${env:ProgramFiles(x86)})) {
+        $path = Join-Path $root 'Milestone\XProtect Recording Server\Drivers\NativeDrivers'
+        if (Test-Path (Join-Path $path 'StableFPS_Data\Video\H264')) { return $path }
+    }
+    throw 'StableFPS_Data\Video\H264 not found under Program Files or Program Files (x86).'
+}
+
+function Get-RecordingServerService {
+    $svc = Get-CimInstance Win32_Service -Filter "DisplayName='Milestone XProtect Recording Server'"
+    if (-not $svc) { throw "Service 'Milestone XProtect Recording Server' not found." }
+    return $svc
+}
+
+function Wait-RecordingServerUptime([int]$Seconds = 90) {
+    # Kit rule: stopping the RS less than 90 s after it started can hang it.
+    $svc = Get-RecordingServerService
+    if ($svc.State -ne 'Running' -or -not $svc.ProcessId) { return }
+    $started = (Get-Process -Id $svc.ProcessId).StartTime
+    $wait = [int]($Seconds - ((Get-Date) - $started).TotalSeconds)
+    if ($wait -gt 0) {
+        Write-Host "The Recording Server started $([int]((Get-Date) - $started).TotalSeconds) s ago; waiting $wait s before stopping it ..."
+        Start-Sleep -Seconds $wait
+    }
+}
+
+function Update-StableFpsRevision([string]$NativeDrivers) {
+    # READ ME (FAQ Q1): any change to the revision number makes the driver re-read the clip list. The file is in
+    # NativeDrivers or NativeDrivers\resources depending on the document: change every copy we find.
+    $files = @(Get-ChildItem $NativeDrivers -Filter 'StableFPS.xml' -Recurse -Depth 2 -ErrorAction SilentlyContinue)
+    if ($files.Count -eq 0) { throw "StableFPS.xml not found under $NativeDrivers" }
+    $backupFolder = 'C:\ScenarioLab\backup'
+    New-Item -ItemType Directory -Force -Path $backupFolder | Out-Null
+    foreach ($file in $files) {
+        $bytes = [IO.File]::ReadAllBytes($file.FullName)
+        $hasBom = $bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF
+        $text = [IO.File]::ReadAllText($file.FullName)
+        $match = [regex]::Match($text, '\$Revision:\s*(\d+)')
+        if (-not $match.Success) { throw "No `$Revision: number in $($file.FullName). Change it by hand (guide, step 4)." }
+        $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+        Copy-Item $file.FullName (Join-Path $backupFolder "StableFPS.xml.$stamp.$($file.Directory.Name).bak")
+        $old = [int64]$match.Groups[1].Value
+        $new = $old + 1
+        $text = $text.Substring(0, $match.Groups[1].Index) + $new + $text.Substring($match.Groups[1].Index + $match.Groups[1].Length)
+        [IO.File]::WriteAllText($file.FullName, $text, (New-Object Text.UTF8Encoding($hasBom)))
+        Write-Host "  $($file.FullName): revision $old -> $new (backup in $backupFolder)"
+    }
+}
+
+if ($Step -in 'All', 'Files') {
+    $native = Find-NativeDrivers
+    $h264 = Join-Path $native 'StableFPS_Data\Video\H264'
+    Write-Host "StableFPS clip folder: $h264" -ForegroundColor Cyan
+
+    Wait-RecordingServerUptime
+    Write-Host 'Stopping the Recording Server (all cameras pause recording for a few minutes) ...'
+    $svc = Get-RecordingServerService
+    Stop-Service -Name $svc.Name
+    try {
+        foreach ($clip in $clips) {
+            Copy-Item (Join-Path $ClipFolder $clip.file) (Join-Path $h264 $clip.file) -Force
+            Write-Host "  copied $($clip.file)"
+        }
+        Update-StableFpsRevision $native
+    }
+    finally {
+        Write-Host 'Starting the Recording Server ...'
+        Start-Service -Name $svc.Name
+    }
+    Write-Host 'Waiting 150 s for the driver to load the clips ...'
+    Start-Sleep -Seconds 150
+    Write-Host 'Files done.' -ForegroundColor Green
+}
+
+# ---------------------------------------------------------------- Cameras
+function Connect-Xprotect {
+    Import-Module MilestonePSTools
+    Connect-Vms -ServerAddress 'http://localhost' -AcceptEula | Out-Null
+    Clear-VmsCache
+}
+
+function ConvertTo-Hashtable($settings) {
+    # Get-VmsHardwareGeneralSetting returns a dictionary in recent versions, an object in older ones.
+    $table = @{}
+    if ($settings -is [Collections.IDictionary]) {
+        foreach ($key in $settings.Keys) { $table[$key] = $settings[$key] }
+    }
+    else {
+        foreach ($p in $settings.PSObject.Properties) { $table[$p.Name] = $p.Value }
+    }
+    return $table
+}
+
+function Get-RawSettings($hardware) {
+    ConvertTo-Hashtable (Get-VmsHardwareGeneralSetting -Hardware $hardware -RawValues)
+}
+
+if ($Step -in 'All', 'Cameras', 'Inspect') {
+    Connect-Xprotect
+    $reference = Get-VmsHardware | Where-Object Name -eq $ReferenceHardware | Select-Object -First 1
+    if (-not $reference) { throw "Reference hardware '$ReferenceHardware' not found (Get-VmsHardware | Select Name, Address)." }
+    $refSettings = Get-RawSettings $reference
+    # The setting that holds the clip file is the one whose value is the reference camera's clip name.
+    $fileKey = $refSettings.Keys | Where-Object { "$($refSettings[$_])" -like "*$ReferenceHardware*" } | Select-Object -First 1
+    if (-not $fileKey) { throw "Could not tell which setting holds the clip file. Run -Step Inspect and set it by hand." }
+}
+
+if ($Step -eq 'Inspect') {
+    Write-Host "Settings of '$ReferenceHardware' (read only). Clip file setting: $fileKey" -ForegroundColor Cyan
+    $refSettings.GetEnumerator() | Sort-Object Name | Format-Table Name, Value -AutoSize
+    $ours = Get-VmsHardware | Where-Object { $_.Address -match ':(\d+)/?$' -and [int]$Matches[1] -ge 200 }
+    foreach ($hw in $ours) {
+        Write-Host "Our hardware '$($hw.Name)' at $($hw.Address)" -ForegroundColor Cyan
+        (Get-RawSettings $hw).GetEnumerator() | Sort-Object Name | Format-Table Name, Value -AutoSize
+    }
+    return
+}
+
+if ($Step -in 'All', 'Cameras') {
+    $rs = Get-VmsRecordingServer | Select-Object -First 1
+    $allHardware = @(Get-VmsHardware)
+    $usedPorts = @($allHardware | ForEach-Object { if ($_.Address -match ':(\d+)/?$') { [int]$Matches[1] } })
+    # StableFPS ignores the user name and password; Add-VmsHardware just requires some. Not a secret.
+    $dummy = New-Object Management.Automation.PSCredential('stablefps', (ConvertTo-SecureString 'ignored-by-driver' -AsPlainText -Force))
+
+    $group = $null
+    try {
+        $group = Get-VmsDeviceGroup -Type Camera -Name $CameraGroup -ErrorAction SilentlyContinue
+        if (-not $group) { $group = New-VmsDeviceGroup -Type Camera -Name $CameraGroup }
+    }
+    catch { Write-Warning "Camera group '$CameraGroup' not made ($($_.Exception.Message)). Add the cameras to a view by hand." }
+
+    $port = $FirstPort
+    foreach ($clip in $clips) {
+        $name = $clip.camera
+        $existing = $allHardware | Where-Object Name -eq $name | Select-Object -First 1
+        if ($existing) {
+            Write-Host "$name already exists at $($existing.Address): skipped." -ForegroundColor Yellow
+            continue
+        }
+        while ($usedPorts -contains $port) { $port++ }
+
+        Write-Host "Adding $name at http://127.0.0.1:$port/ ..." -ForegroundColor Cyan
+        $address = "http://127.0.0.1:$port/"
+        try {
+            # Same driver as Milestone's clip camera, taken from that hardware.
+            $hw = Add-VmsHardware -RecordingServer $rs -HardwareAddress $address `
+                -HardwareDriverPath $reference.HardwareDriverPath -Name $name -Credential $dummy -Force
+        }
+        catch {
+            Write-Host "  (by driver path failed: $($_.Exception.Message); trying by driver number)"
+            $driver = Get-VmsHardwareDriver -RecordingServer $rs | Where-Object Name -like '*StableFPS*' | Select-Object -First 1
+            if (-not $driver) { throw 'StableFPS driver not found. Add the hardware by hand (xprotect-setup\README.md).' }
+            $hw = Add-VmsHardware -RecordingServer $rs -HardwareAddress $address `
+                -DriverNumber $driver.Number -Name $name -Credential $dummy -Force
+        }
+        $usedPorts += $port
+
+        # Copy only the settings where Milestone's clip camera differs from a fresh device (fps, codec, file),
+        # with the file setting pointing at our clip.
+        $fresh = Get-RawSettings $hw
+        $changes = @{}
+        foreach ($key in $refSettings.Keys) {
+            if ($key -eq $fileKey) { continue }
+            if ($fresh.ContainsKey($key) -and "$($fresh[$key])" -ne "$($refSettings[$key])") { $changes[$key] = $refSettings[$key] }
+        }
+        $changes[$fileKey] = [IO.Path]::GetFileName($clip.file)
+        try {
+            Set-VmsHardwareGeneralSetting -Hardware $hw -Settings $changes
+            Write-Host ('  settings: ' + (($changes.GetEnumerator() | ForEach-Object { "$($_.Name)=$($_.Value)" }) -join ', '))
+        }
+        catch {
+            Write-Warning "  Settings not applied ($($_.Exception.Message)). Set them by hand: Management Client, Recording Servers, $name, Settings: Frames per second 10, VideoCodec H264, VideoH264Files $($clip.file)."
+        }
+
+        # Configuration API objects: the hardware's first camera channel, renamed and enabled.
+        $camera = @($hw.CameraFolder.Cameras) | Select-Object -First 1
+        if ($camera) {
+            $camera.Name = $name
+            $camera.Enabled = $true
+            $camera.Save()
+            if ($group) {
+                try { Add-VmsDeviceGroupMember -Group $group -Device $camera } catch { Write-Warning "  Not added to group: $($_.Exception.Message)" }
+            }
+            Write-Host "  camera '$name' ready." -ForegroundColor Green
+        }
+        $port++
+    }
+    Clear-VmsCache
+    Write-Host ''
+    Write-Host 'Cameras done. In Smart Client: make a view "Scenario Lab" with these cameras (not in Hackathon > Cameras).' -ForegroundColor Green
+    Write-Host 'They record on motion like the others; give them a minute before testing with Hafnia.'
+}
