@@ -41,7 +41,9 @@ if ($FirstPort -lt 200) { throw 'Ports below 200 belong to Milestone. Use 200 or
 $manifestPath = Join-Path $ClipFolder 'clips.json'
 if ($Step -ne 'Inspect') {
     if (-not (Test-Path $manifestPath)) { throw "Not found: $manifestPath (made by scripts/convert_clips.py)." }
-    $clips = @(Get-Content $manifestPath -Raw | ConvertFrom-Json)
+    # Windows PowerShell 5.1's ConvertFrom-Json returns a JSON list as ONE object; piping it through ForEach-Object
+    # unrolls it into one item per clip.
+    $clips = @((Get-Content $manifestPath -Raw | ConvertFrom-Json) | ForEach-Object { $_ })
     foreach ($clip in $clips) {
         if ($clip.camera -notmatch '^[A-Za-z0-9_-]+$') { throw "Bad camera name '$($clip.camera)'." }
         if (-not (Test-Path (Join-Path $ClipFolder $clip.file))) { throw "Clip file missing: $($clip.file)" }
