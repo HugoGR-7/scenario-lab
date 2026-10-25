@@ -165,6 +165,19 @@ function Get-RawSettings($hardware) {
     return ConvertTo-Hashtable (Get-VmsDeviceGeneralSetting -Device $hardware -RawValues)
 }
 
+# Keys look like "hardware/FileName/<GUID>"; the GUID (globally unique identifier) may differ between two hardware
+# devices, so settings are matched between devices by the part before it ("hardware/FileName").
+function Get-ShortKey([string]$key) {
+    return ($key -replace '/[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$', '')
+}
+
+function Show-Settings([hashtable]$settings) {
+    # Out-String + Write-Host: a table printed inside a script with Write-Host lines around it can otherwise be lost.
+    $settings.GetEnumerator() | Sort-Object Name |
+        Select-Object @{ n = 'Setting'; e = { Get-ShortKey $_.Name } }, Value, @{ n = 'Full key'; e = { $_.Name } } |
+        Format-Table -AutoSize | Out-String -Width 300 | Write-Host
+}
+
 function Set-RawSettings($hardware, [hashtable]$changes) {
     $item = Get-DriverSettingsItem $hardware
     if ($item) {
@@ -187,11 +200,11 @@ if ($Step -in 'All', 'Cameras', 'Inspect') {
 
 if ($Step -eq 'Inspect') {
     Write-Host "Settings of '$ReferenceHardware' (read only). Clip file setting: $fileKey" -ForegroundColor Cyan
-    $refSettings.GetEnumerator() | Sort-Object Name | Format-Table Name, Value -AutoSize
+    Show-Settings $refSettings
     $ours = Get-VmsHardware | Where-Object { $_.Address -match ':(\d+)/?$' -and [int]$Matches[1] -ge 200 }
     foreach ($hw in $ours) {
         Write-Host "Our hardware '$($hw.Name)' at $($hw.Address)" -ForegroundColor Cyan
-        (Get-RawSettings $hw).GetEnumerator() | Sort-Object Name | Format-Table Name, Value -AutoSize
+        Show-Settings (Get-RawSettings $hw)
     }
     return
 }
@@ -239,12 +252,19 @@ if ($Step -in 'All', 'Cameras') {
         # Copy only the settings where Milestone's clip camera differs from a fresh device (fps, codec, file),
         # with the file setting pointing at our clip.
         $fresh = Get-RawSettings $hw
+        $freshKeys = @{}   # short key -> this device's full key
+        foreach ($key in $fresh.Keys) { $freshKeys[(Get-ShortKey $key)] = $key }
         $changes = @{}
         foreach ($key in $refSettings.Keys) {
-            if ($key -eq $fileKey) { continue }
-            if ($fresh.ContainsKey($key) -and "$($fresh[$key])" -ne "$($refSettings[$key])") { $changes[$key] = $refSettings[$key] }
+            $short = Get-ShortKey $key
+            if (-not $freshKeys.ContainsKey($short)) { continue }
+            $target = $freshKeys[$short]
+            if ($key -eq $fileKey) { $changes[$target] = [IO.Path]::GetFileName($clip.file); continue }
+            if ("$($fresh[$target])" -ne "$($refSettings[$key])") { $changes[$target] = $refSettings[$key] }
         }
-        $changes[$fileKey] = [IO.Path]::GetFileName($clip.file)
+        if (-not $freshKeys.ContainsKey((Get-ShortKey $fileKey))) {
+            Write-Warning "  The new device has no '$(Get-ShortKey $fileKey)' setting: set the clip file by hand."
+        }
         try {
             Set-RawSettings $hw $changes
             Write-Host ('  settings: ' + (($changes.GetEnumerator() | ForEach-Object { "$($_.Name)=$($_.Value)" }) -join ', '))
