@@ -133,7 +133,6 @@ function Connect-Xprotect {
 }
 
 function ConvertTo-Hashtable($settings) {
-    # Get-VmsHardwareGeneralSetting returns a dictionary in recent versions, an object in older ones.
     $table = @{}
     if ($settings -is [Collections.IDictionary]) {
         foreach ($key in $settings.Keys) { $table[$key] = $settings[$key] }
@@ -144,8 +143,36 @@ function ConvertTo-Hashtable($settings) {
     return $table
 }
 
+# The hardware's driver settings ("Settings" tab in Management Client), read and written through XProtect's
+# Configuration API objects that MilestonePSTools returns: Hardware > HardwareDriverSettingsFolder >
+# HardwareDriverSettings > HardwareDriverSettingsChildItems[0].Properties. Values are raw (the stored value, not
+# the text Management Client shows). If that path is missing, fall back to MilestonePSTools' own cmdlets.
+function Get-DriverSettingsItem($hardware) {
+    $settings = @($hardware.HardwareDriverSettingsFolder.HardwareDriverSettings)[0]
+    if (-not $settings) { return $null }
+    $child = @($settings.HardwareDriverSettingsChildItems)[0]
+    if (-not $child -or -not $child.Properties) { return $null }
+    return @{ Settings = $settings; Child = $child }
+}
+
 function Get-RawSettings($hardware) {
-    ConvertTo-Hashtable (Get-VmsHardwareGeneralSetting -Hardware $hardware -RawValues)
+    $item = Get-DriverSettingsItem $hardware
+    if ($item) {
+        $table = @{}
+        foreach ($key in $item.Child.Properties.Keys) { $table[$key] = $item.Child.Properties.GetValue($key) }
+        return $table
+    }
+    return ConvertTo-Hashtable (Get-VmsDeviceGeneralSetting -Device $hardware -RawValues)
+}
+
+function Set-RawSettings($hardware, [hashtable]$changes) {
+    $item = Get-DriverSettingsItem $hardware
+    if ($item) {
+        foreach ($key in $changes.Keys) { $item.Child.Properties.SetValue($key, [string]$changes[$key]) }
+        $item.Settings.Save()
+        return
+    }
+    Set-VmsDeviceGeneralSetting -Device $hardware -Settings $changes
 }
 
 if ($Step -in 'All', 'Cameras', 'Inspect') {
@@ -219,7 +246,7 @@ if ($Step -in 'All', 'Cameras') {
         }
         $changes[$fileKey] = [IO.Path]::GetFileName($clip.file)
         try {
-            Set-VmsHardwareGeneralSetting -Hardware $hw -Settings $changes
+            Set-RawSettings $hw $changes
             Write-Host ('  settings: ' + (($changes.GetEnumerator() | ForEach-Object { "$($_.Name)=$($_.Value)" }) -join ', '))
         }
         catch {
