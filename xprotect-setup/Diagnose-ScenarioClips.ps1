@@ -71,18 +71,47 @@ foreach ($hw in @($reference) + $ours) {
     }
 }
 
-Section 'Cameras state (from the Event Server)'
-try {
-    Get-VmsCameraStatus -ErrorAction Stop | Where-Object { $_.Name -like 'vandalism*' -or $_.Name -like "*$ReferenceHardware*" } |
-        Format-Table -AutoSize | Out-String -Width 250
+# Camera-level settings (the camera's own Settings tab, below the hardware) and its streams, side by side:
+# Milestone's camera vs ours. A difference here (codec, resolution, frame rate of the stream) is the next suspect.
+function Get-CameraSettings($cam) {
+    $table = [ordered]@{}
+    try {
+        $settings = @($cam.DeviceDriverSettingsFolder.DeviceDriverSettings)[0]
+        foreach ($child in @($settings.DeviceDriverSettingsChildItems)) {
+            foreach ($key in ($child.Properties.Keys | Sort-Object)) {
+                $short = $key -replace '/[0-9A-Fa-f-]{36}$', ''
+                $table["$($child.DisplayName) | $short"] = $child.Properties.GetValue($key)
+            }
+        }
+    }
+    catch { $table['ERROR'] = $_.Exception.Message }
+    try {
+        foreach ($stream in @(@($cam.StreamFolder.Streams)[0].StreamUsageChildItems)) {
+            $table["stream | $($stream.Name)"] = "live=$($stream.LiveDefault) record=$($stream.Record) mode=$($stream.LiveMode) source=$($stream.StreamReferenceId)"
+        }
+    }
+    catch { $table['stream ERROR'] = $_.Exception.Message }
+    return $table
 }
-catch { "Get-VmsCameraStatus not available: $($_.Exception.Message)" }
+
+Section 'Camera-level settings: Milestone camera vs ours'
+$refCam = @($reference.CameraFolder.Cameras)[0]
+$ourCams = @($ours | ForEach-Object { @($_.CameraFolder.Cameras)[0] })
+$columns = @(@{ Name = 'ref'; Settings = Get-CameraSettings $refCam }) +
+    @($ourCams | ForEach-Object { @{ Name = $_.Name; Settings = Get-CameraSettings $_ } })
+$allKeys = $columns | ForEach-Object { $_.Settings.Keys } | Sort-Object -Unique
+foreach ($key in $allKeys) {
+    $values = $columns | ForEach-Object { "$($_.Settings[$key])" }
+    $mark = if (@($values | Sort-Object -Unique).Count -gt 1) { '  <-- DIFFERENT' } else { '' }
+    "{0,-60} {1}{2}" -f $key, ($values -join '  |  '), $mark
+}
+"(columns: $($refCam.Name)  |  " + (($ourCams | ForEach-Object { $_.Name }) -join '  |  ') + ')'
 
 # ---------------------------------------------------------------- Recording Server log
 Section 'DeviceHandling.log: lines about ports 200-202 or our clips (last 60)'
 $log = 'C:\ProgramData\Milestone\XProtect Recording Server\Logs\DeviceHandling.log'
 if (Test-Path $log) {
-    Get-Content $log -Tail 20000 | Select-String -Pattern '127\.0\.0\.1:20[0-9]', 'vandalism_[su]\d', ':20[0-9]/' | Select-Object -Last 60 |
+    Get-Content $log -Tail 20000 | Select-String -Pattern '127\.0\.0\.1:20[0-9]', 'vandalism_[su]\d', ':20[0-9]/' | Select-Object -Last 9 |
         ForEach-Object { $_.Line }
     Section 'DeviceHandling.log: last 25 lines'
     Get-Content $log -Tail 25
