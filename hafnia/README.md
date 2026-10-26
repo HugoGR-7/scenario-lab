@@ -54,6 +54,13 @@ The exact request and answer (camera ID is specific to this machine):
 }
 ```
 
+## Setup
+
+`xprotect-setup/Setup-ScenarioLab.ps1` creates everything in the table below that is missing (the saved prompt and
+gateway rule through the gateway API, the analytics event through the Configuration REST API, the alarm definition with
+MilestonePSTools). Analytics events must be switched on by hand first: Management Client > Tools > Options > Analytics
+Events.
+
 ## Names
 
 | Thing | Where | Name / value |
@@ -61,7 +68,7 @@ The exact request and answer (camera ID is specific to this machine):
 | Saved prompt | Hafnia gateway, Prompts | Title `Scenario Lab` |
 | Gateway rule | Hafnia gateway, Rules | Name `Scenario Lab`, prompt *Scenario Lab*, trigger text `SCENARIO_DETECTED` |
 | Analytics event | Management Client, Rules and Events, Analytics Events | `Scenario Lab detection` |
-| Alarm definition | Management Client, Alarms, Alarm Definitions | `Scenario Lab: scenario detected`, sources *All Cameras* |
+| Alarm definition | Management Client, Alarms, Alarm Definitions | `Scenario Lab: scenario detected`, sources *All Cameras* (an alarm only appears for cameras in its sources) |
 
 ## Keyword instruction (appended to every question)
 

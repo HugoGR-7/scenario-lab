@@ -1,0 +1,5 @@
+[
+  {"camera": "vandalism_s1_rock_window", "file": "832x480_vandalism_s1_rock_window", "scenario_id": "vandalism_s1", "scenario": "A person is breaking a window with a rock.", "expected": "detect"},
+  {"camera": "vandalism_s6_cleaning_window", "file": "832x480_vandalism_s6_cleaning_window", "scenario_id": "vandalism_s6", "scenario": "A worker is cleaning the wall with a brush (generated as a man wiping the window with a cloth).", "expected": "no detect"},
+  {"camera": "vandalism_u1_graffiti", "file": "832x480_vandalism_u1_graffiti", "scenario_id": "vandalism_u1", "scenario": "User's own scenario: a person sprays graffiti on the wall.", "expected": "detect"}
+]

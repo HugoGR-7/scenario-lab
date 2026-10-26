@@ -13,3 +13,7 @@
 *.jpg  binary
 *.mp4  binary
 *.dll  binary
+
+# StableFPS clips: raw H.264 without an extension. Never convert line endings in them.
+demo/stablefps/832x480_* binary
+*.json    text eol=lf

@@ -1,14 +1,15 @@
 <#
 Install-ScenarioClips.ps1 - load generated clips into XProtect as StableFPS cameras (one camera per clip).
 
-Run on p043 in PowerShell as Administrator, from the repository folder:
+Run on the XProtect machine in PowerShell as Administrator, from the repository folder:
     powershell -NoProfile -ExecutionPolicy Bypass -File .\xprotect-setup\Install-ScenarioClips.ps1
     ... -Step Files      only copy the clips and restart the Recording Server
     ... -Step Cameras    only add the cameras (after Files)
     ... -Step Inspect    change nothing: print the StableFPS settings of a Milestone camera and of ours
 
-Input: the folder written by scripts/convert_clips.py (default C:\ScenarioLab\stablefps): the raw H.264 files
-(832x480_<camera name>) and clips.json, which lists camera name -> file.
+Input (default: the repository's demo\stablefps): the ready clips as raw H.264 files (832x480_<camera name>) and
+clips.json, which lists camera name -> file. To install clips of your own, convert them with scripts/convert_clips.py
+and pass that folder with -ClipFolder.
 
 What it does (guides/stablefps-custom-clips.md, confirmed by Milestone support on 22 Oct 2026):
   Files:   wait until the Recording Server (RS) has run 90 s -> stop it -> copy the clips into StableFPS_Data\Video\H264
@@ -22,7 +23,7 @@ Never touches Milestone's 11 cameras: their hardware is only READ, to copy its s
 already copied are replaced, cameras that already exist (same name) are skipped.
 #>
 param(
-    [string]$ClipFolder = 'C:\ScenarioLab\stablefps',
+    [string]$ClipFolder = (Join-Path (Split-Path $PSScriptRoot -Parent) 'demo\stablefps'),
     [ValidateSet('All', 'Files', 'Cameras', 'Inspect')][string]$Step = 'All',
     [int]$FirstPort = 200,
     # A Milestone StableFPS camera whose settings we copy (read only).
@@ -40,7 +41,7 @@ if ($FirstPort -lt 200) { throw 'Ports below 200 belong to Milestone. Use 200 or
 # ---------------------------------------------------------------- clips.json
 $manifestPath = Join-Path $ClipFolder 'clips.json'
 if ($Step -ne 'Inspect') {
-    if (-not (Test-Path $manifestPath)) { throw "Not found: $manifestPath (made by scripts/convert_clips.py)." }
+    if (-not (Test-Path $manifestPath)) { throw "Not found: $manifestPath (the repository's demo\stablefps, or a folder made by scripts/convert_clips.py)." }
     # Windows PowerShell 5.1's ConvertFrom-Json returns a JSON list as ONE object; piping it through ForEach-Object
     # unrolls it into one item per clip.
     $clips = @((Get-Content $manifestPath -Raw | ConvertFrom-Json) | ForEach-Object { $_ })
@@ -295,6 +296,6 @@ if ($Step -in 'All', 'Cameras') {
     }
     Clear-VmsCache
     Write-Host ''
-    Write-Host 'Cameras done. In Smart Client: make a view "Scenario Lab" with these cameras (not in Hackathon > Cameras).' -ForegroundColor Green
+    Write-Host 'Cameras done. Next: xprotect-setup\Setup-ScenarioLab.ps1 (alarm, Hafnia prompt and rule, demo suggestions).' -ForegroundColor Green
     Write-Host 'They record on motion like the others; give them a minute before testing with Hafnia.'
 }

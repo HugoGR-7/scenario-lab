@@ -1,0 +1,10 @@
+[
+  {"title": "A person is breaking a window with a rock.", "category": "vandalism", "where": "on the brick wall near the windows"},
+  {"title": "Someone is trying to pry open a window using a long tool.", "category": "intrusion/theft", "where": "on the brick wall near the windows"},
+  {"title": "A vehicle skids and stops abruptly on the asphalt.", "category": "accident", "where": "on the asphalt driveway"},
+  {"title": "A person trips and falls near the gravel strip.", "category": "safety hazard", "where": "between the asphalt and the brick wall"},
+  {"title": "Two people are arguing loudly near the building entrance.", "category": "suspicious behaviour", "where": "at the edge of the asphalt where it meets the building"},
+  {"title": "A worker is cleaning the wall with a brush.", "category": "harmless look-alike", "where": "on the brick wall near the windows"},
+  {"title": "A person is attempting to climb the metal siding.", "category": "intrusion/theft", "where": "on the upper metal siding section"},
+  {"title": "A person is dragging a large object across the asphalt.", "category": "suspicious behaviour", "where": "on the asphalt driveway"}
+]
