@@ -42,12 +42,14 @@ It asks once for the Hafnia gateway password (the Windows Administrator password
 |---|---|
 | `Folders` | `C:\ScenarioLab\snapshots`, `C:\ScenarioLab\suggestions`, and copies `demo\suggestions\vandalism_scenarios.json` there |
 | `AnalyticsEvent` | Analytics event `Scenario Lab detection` (Configuration REST API, as the current Windows user) |
-| `Alarm` | Alarm definition `Scenario Lab: scenario detected` on that event; sources **All Cameras** |
+| `Alarm` | Alarm definition `Scenario Lab: scenario detected` on that event, with the clip cameras among its sources |
 | `Hafnia` | Saved prompt `Scenario Lab`, gateway rule `Scenario Lab` (`SCENARIO_DETECTED` → `Scenario Lab detection`) |
 
-**Alarm sources.** An alarm only appears for cameras in the alarm definition's sources. With *All Cameras* (the
-default) every clip camera is covered, including ones added later. `-AlarmSources ScenarioLab` lists only the snapshot
-camera `vandalism` and the cameras in `demo\stablefps\clips.json`. If the script cannot change the sources, it prints
+**Alarm sources.** An alarm only appears for cameras in the alarm definition's sources. A new definition gets *All
+Cameras* (the default), so every clip camera is covered, including ones added later; `-AlarmSources ScenarioLab` lists
+only the snapshot camera `vandalism` and the cameras in `demo\stablefps\clips.json`. An existing definition keeps its
+sources and gets the snapshot camera and the clip cameras added (switching an existing one to *All Cameras* was refused
+on p043). If the script cannot change the sources, it prints
 the clicks: Management Client > Alarms > Alarm Definitions > *Scenario Lab: scenario detected* > Sources.
 
 ## When a clip camera shows no video

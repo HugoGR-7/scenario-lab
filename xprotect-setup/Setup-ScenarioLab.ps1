@@ -83,16 +83,18 @@ if ($Step -in 'All', 'Alarm') {
     Connect-Vms -ServerAddress 'http://localhost' -AcceptEula | Out-Null
     Clear-VmsCache
 
+    # The snapshot camera and the clip cameras (by name, from demo\stablefps\clips.json).
+    $manifest = Join-Path $repo 'demo\stablefps\clips.json'
+    $names = @($snapshotCamera) + @((Get-Content $manifest -Raw | ConvertFrom-Json) | ForEach-Object { $_ } | ForEach-Object { $_.camera })
+    $cameras = @(Get-VmsCamera | Where-Object { $names -contains $_.Name })
+    $missing = @($names | Where-Object { $cameras.Name -notcontains $_ })
+    if ($missing.Count) { Write-Warning "  Cameras not found (install the clips first): $($missing -join ', ')" }
+
     if ($AlarmSources -eq 'AllCameras') {
         $sourcePaths = @($allCamerasPath)
         $sourceLabel = 'All Cameras'
     }
     else {
-        $manifest = Join-Path $repo 'demo\stablefps\clips.json'
-        $names = @($snapshotCamera) + @((Get-Content $manifest -Raw | ConvertFrom-Json) | ForEach-Object { $_ } | ForEach-Object { $_.camera })
-        $cameras = @(Get-VmsCamera | Where-Object { $names -contains $_.Name })
-        $missing = @($names | Where-Object { $cameras.Name -notcontains $_ })
-        if ($missing.Count) { Write-Warning "  Cameras not found (install the clips first): $($missing -join ', ')" }
         $sourcePaths = @($cameras | ForEach-Object { $_.Path })
         $sourceLabel = ($cameras.Name -join ', ')
     }
@@ -116,20 +118,31 @@ if ($Step -in 'All', 'Alarm') {
         $type = $def.EventTypeValues.Keys | Where-Object { $def.EventTypeValues[$_] -eq $def.EventType }
         Say "  present: $alarmName (triggering event: $group > $type)"
         $current = @("$($def.SourceList)".Split(',') | ForEach-Object { $_.Trim() } | Where-Object { $_ })
-        $wanted = @($sourcePaths | Sort-Object)
-        if ((@($current | Sort-Object) -join ',') -eq ($wanted -join ',')) {
-            Say "  sources already: $sourceLabel"
+        if ($current -contains $allCamerasPath) {
+            Say '  sources already: All Cameras'
         }
         else {
-            Say "  sources now: $($current -join ', ')"
-            try {
-                $def.SourceList = ($sourcePaths -join ',')
-                $def.Save()
-                Say "  sources set to: $sourceLabel" Green
+            # Keep what is there and add the cameras that are missing. Changing an existing definition to the
+            # "All Cameras" group was refused on p043 (ValidateResultException), while camera paths are the format
+            # the definition already holds.
+            $toAdd = @($cameras | Where-Object { $current -notcontains $_.Path })
+            if ($toAdd.Count -eq 0) {
+                Say "  sources already include: $($cameras.Name -join ', ')"
             }
-            catch {
-                Write-Warning "  Sources not changed: $($_.Exception.Message)"
-                Manual "Management Client > Alarms > Alarm Definitions > '$alarmName' > Sources: $sourceLabel. Save."
+            else {
+                $merged = @($current) + @($toAdd | ForEach-Object { $_.Path })
+                try {
+                    $def.SourceList = ($merged -join ',')
+                    $def.Save()
+                    Say "  sources: added $($toAdd.Name -join ', ')" Green
+                }
+                catch {
+                    $inner = $_.Exception
+                    while ($inner.InnerException) { $inner = $inner.InnerException }
+                    $details = @($inner.ValidateResult.ErrorResults | ForEach-Object { "$($_.ErrorProperty): $($_.ErrorText)" }) -join '; '
+                    Write-Warning "  Sources not changed: $($inner.Message) $details"
+                    Manual "Management Client > Alarms > Alarm Definitions > '$alarmName' > Sources: add $($toAdd.Name -join ', '). Save."
+                }
             }
         }
     }
