@@ -741,14 +741,16 @@ namespace ScenarioLab.Client
             {
                 _rows.Add(s);
             }
-            // Control: the snapshot camera itself, from the snapshot moment, where nothing happens.
+            // The original camera's own (real) recording, from the snapshot moment: the question must also behave
+            // right on real footage. Expected defaults to "detect" because the demo camera, vandalism, loops a real
+            // incident (a man throws a stone through a window every ~10 s); change it in the row for a quiet camera.
             _rows.Add(new Scenario
             {
                 Id = selection.Camera,
-                Title = "Control: the original camera at the snapshot moment (nothing happens)",
-                Category = "control",
+                Title = "Original camera: real recording of " + selection.Camera + " from the snapshot moment",
+                Category = "original",
                 Source = Scenario.Control,
-                Expected = Scenario.NoDetect,
+                Expected = Scenario.Detect,
                 StartAtUtc = selection.SnapshotUtc
             });
             ShowSelection();

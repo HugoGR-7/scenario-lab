@@ -21,7 +21,7 @@ namespace ScenarioLab.Client
         // Source values.
         public const string FromSuggestion = "suggested";
         public const string FromUser = "user";
-        public const string Control = "control";   // the snapshot camera itself, at the snapshot moment: "nothing happens"
+        public const string Control = "control";   // the original camera's real recording, from the snapshot moment
 
         // ---- Saved in <camera>_scenarios_user.json (the hand-off to video generation) ----
         public string Id { get; set; }          // e.g. vandalism_s1 (suggestion 1) or vandalism_u1 (the user's first own scenario)

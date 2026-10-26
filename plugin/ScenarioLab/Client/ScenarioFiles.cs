@@ -13,7 +13,7 @@ namespace ScenarioLab.Client
     {
         public string Camera;            // XProtect name of the camera the snapshot came from
         public string Snapshot;          // full path of the snapshot PNG
-        public DateTime SnapshotUtc;     // the snapshot frame's own time (the "nothing happens" control starts here)
+        public DateTime SnapshotUtc;     // the snapshot frame's own time (the original-camera row's clip starts here)
         public string SuggestionsFile;   // the file the suggestions came from
         public DateTime SavedUtc;
         public List<Scenario> Scenarios = new List<Scenario>();

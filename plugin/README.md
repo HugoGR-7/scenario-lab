@@ -55,12 +55,13 @@ The tab has two pages, switched with the buttons at the top.
 **Page 2: Generated clips & Hafnia test**
 
 4. **Generated clips in XProtect:** each saved scenario next to the XProtect camera that plays its clip, found by name
-   (`<id>` or `<id>_anything`, see `xprotect-setup/README.md`), plus a **control** row: the snapshot camera from the
-   snapshot moment, where nothing happens. Clicking a row shows that camera live. *Expected* can be changed per row.
+   (`<id>` or `<id>_anything`, see `xprotect-setup/README.md`), plus an **original camera** row: the snapshot camera's
+   real recording from the snapshot moment (Expected defaults to *detect*, because the demo camera `vandalism` loops a
+   real stone-throwing incident; set it to what really happens on your camera). Clicking a row shows that camera live. *Expected* can be changed per row.
 5. **Test with Hafnia:** connect with the gateway password (memory only), write one detection question, then **Run
    selected** or **Run all**. One request per clip: the question plus a fixed keyword instruction, the saved prompt
-   *Scenario Lab*'s ID, and 10/20/30 seconds of recording (a generated clip loops, so its latest seconds; the control
-   from the snapshot moment). Each row shows got vs. expected (PASS / FAIL) and the answer. A "detected" answer also
+   *Scenario Lab*'s ID, and 10/20/30 seconds of recording (a generated clip loops, so its latest seconds; the original
+   camera from the snapshot moment). Each row shows got vs. expected (PASS / FAIL) and the answer. A "detected" answer also
    raises the XProtect alarm *Scenario Lab: scenario detected* through the gateway rule. Every test is appended to
    `C:\ScenarioLab\runs.jsonl`. Setup and names: `hafnia/README.md`.
 

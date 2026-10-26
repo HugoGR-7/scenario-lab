@@ -249,7 +249,7 @@
                         </DataGrid.Columns>
                     </DataGrid>
                     <TextBlock Style="{StaticResource Hint}"
-                               Text="Click a row to watch its camera on the right. Each clip is an ordinary XProtect camera named after the scenario ID (for example vandalism_s1_rock_window). The last row is the control: the snapshot camera itself, from the snapshot moment, where nothing happens."/>
+                               Text="Click a row to watch its camera on the right. Each clip is an ordinary XProtect camera named after the scenario ID (for example vandalism_s1_rock_window). The last row is the original camera's real recording from the snapshot moment: set its Expected to what really happens there."/>
 
                     <!-- 5. Test a detection question with Hafnia VLM -->
                     <TextBlock Style="{StaticResource StepHeader}" Text="5. Test with Hafnia" Margin="0,18,0,6"/>
@@ -281,7 +281,7 @@
                         </StackPanel>
                     </DockPanel>
                     <TextBlock x:Name="_requestHint" Style="{StaticResource Hint}"
-                               Text="1 Hafnia request per clip. Generated clips: the latest recorded seconds of their camera (the clip loops). Control: from the snapshot moment."/>
+                               Text="1 Hafnia request per clip. Generated clips: the latest recorded seconds of their camera (the clip loops). Original camera: from the snapshot moment."/>
                     <TextBlock x:Name="_runProgress" Margin="0,6,0,0" TextWrapping="Wrap"/>
                 </StackPanel>
             </ScrollViewer>

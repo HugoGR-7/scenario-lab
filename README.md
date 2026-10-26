@@ -26,8 +26,8 @@ every clip, and see PASS or FAIL per clip, plus real XProtect alarms, before tun
 3. **Generated clips.** An image-to-video model renders each chosen scenario, with the snapshot as the first frame.
    Each clip plays in XProtect as its own camera (Milestone's StableFPS driver), so to XProtect and Hafnia it is an
    ordinary recorded camera.
-4. **Test with Hafnia.** One detection question for every clip, plus a control: the real camera at the snapshot
-   moment, where nothing happens. One request per clip. The table shows expected vs. got, PASS or FAIL, and Hafnia's
+4. **Test with Hafnia.** One detection question for every clip, plus the original camera's real recording from the
+   snapshot moment, so the question is checked on real footage too. One request per clip. The table shows expected vs. got, PASS or FAIL, and Hafnia's
    answer.
 5. **Back into XProtect.** A "detected" answer raises the analytics event *Scenario Lab detection* through a Hafnia
    gateway rule, and the alarm *Scenario Lab: scenario detected* in Smart Client's Alarm Manager.
@@ -35,7 +35,7 @@ every clip, and see PASS or FAIL per clip, plus real XProtect alarms, before tun
 **What is live and what is prepared.** Steps 1, 4 and 5 run live on the XProtect machine. Steps 2 and 3 need a GPU
 (graphics processor) and models the hackathon machine does not have. So this repository ships their output for the
 `vandalism` camera: the suggestions (`demo/suggestions`) and three generated clips (`demo/stablefps`), produced with
-ComfyUI (Qwen VL for the scene analysis, LTX for image-to-video). On a real site both would run on a local GPU server,
+ComfyUI: Qwen3-VL for the scene analysis, LTX-2.5 for image-to-video. The two workflows are in `comfyui/`. On a real site both would run on a local GPU server,
 so customer footage never leaves the site. Any model works as long as it writes the same JSON and clips (see
 "Your own scenarios and clips").
 
@@ -43,6 +43,7 @@ so customer footage never leaves the site. Any model works as long as it writes 
 
 | Folder | Contents |
 |---|---|
+| `comfyui/` | The two ComfyUI workflows that made the demo data: Stage A (snapshot → scenarios), Stage B (snapshot + scenario → video). Details: `comfyui/README.md` |
 | `plugin/` | The C# MIP (Milestone Integration Platform) Smart Client plug-in: the *Scenario Lab* tab. Details: `plugin/README.md` |
 | `demo/suggestions/` | `vandalism_scenarios.json`: the 8 scenarios suggested for the `vandalism` camera's empty street |
 | `demo/stablefps/` | The 3 generated clips, ready for StableFPS (raw H.264, 832×480, 10 fps, 10 s), and `clips.json` (camera name → file, scenario) |
@@ -115,7 +116,7 @@ Uses **4 Hafnia requests** (of 500 a day).
 
 **Page ② Generated clips & Hafnia test**
 
-6. Four rows, each with its camera: the three scenarios and the control. Click a row to watch its clip live.
+6. Four rows, each with its camera: the three scenarios and the original camera. Click a row to watch its clip live.
 7. Type the gateway password and press **Connect**.
 8. Keep the question *Is someone vandalising the building in this video, for example breaking a window or painting on
    the wall?* and press **Run all (4 requests)**. The live view follows each clip as it is tested.
@@ -125,10 +126,10 @@ Uses **4 Hafnia requests** (of 500 a day).
 | Rock through the window | detect | detected, PASS |
 | Cleaning the window (harmless look-alike) | no detect | not detected, PASS |
 | Graffiti (user's own scenario) | detect | detected, PASS |
-| Control: `vandalism` at the snapshot moment | no detect | not detected, PASS |
+| Original camera: `vandalism`, real recording from the snapshot moment (its 10-second loop shows a man throwing a stone through a window) | detect | detected, PASS |
 
-9. Open **Alarm Manager**: the rock and graffiti runs each raised *Scenario Lab: scenario detected* on their own clip
-   camera. It can take a few minutes.
+9. Open **Alarm Manager**: the rock, graffiti and original-camera runs each raised *Scenario Lab: scenario detected* on
+   their own camera. It can take a few minutes.
 
 If a row fails, change the question and run that row again (**Run selected**, 1 request). This is the point of the
 tool: the question that will run on live cameras gets tuned against the site's own edge cases first.
@@ -152,9 +153,9 @@ own scenarios get `<camera>_u1`, `_u2`, … The clip camera for a scenario is na
 
 The demo data is ready to use. To try another camera or other scenarios:
 
-1. **Suggestions:** run any vision-language model on a snapshot from page ① and save its answer as
+1. **Suggestions:** run Stage A (`comfyui/`), or any vision-language model, on a snapshot from page ① and save its answer as
    `C:\ScenarioLab\suggestions\<camera>_scenarios.json` in the format above.
-2. **Clips:** generate one video per chosen scenario, with the snapshot as the first frame (static camera, one clear
+2. **Clips:** generate one video per chosen scenario with Stage B, or any image-to-video model, with the snapshot as the first frame (static camera, one clear
    action, about 10 seconds). Convert them, with ffmpeg installed:
 
    ```bash
