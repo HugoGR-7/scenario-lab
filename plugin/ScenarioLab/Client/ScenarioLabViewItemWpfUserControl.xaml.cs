@@ -109,7 +109,7 @@ namespace ScenarioLab.Client
         {
             _settingFromCode = true;
             _tab1 = new VideoOSTabControlPrimaryItem { Text = "Snapshot & scenarios" };
-            _tab2 = new VideoOSTabControlPrimaryItem { Text = "Generated clips & Hafnia test" };
+            _tab2 = new VideoOSTabControlPrimaryItem { Text = "Clips & Hafnia test" };
             _tabs.ItemsSource = new List<VideoOSTabControlPrimaryItem> { _tab1, _tab2 };
             _tabs.SelectedItem = _tab1;
             FitTabsToText();

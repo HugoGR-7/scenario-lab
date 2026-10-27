@@ -112,9 +112,9 @@ Uses **4 Hafnia requests** (of 500 a day).
 4. Under *Add your own scenario* type `A person sprays graffiti on the wall`, keep *Should trigger the alarm*, press
    **Add**. It must be the first one you add, because it becomes `vandalism_u1`, the name of its clip camera.
 5. Press **Save selection**. This writes `C:\ScenarioLab\suggestions\vandalism_scenarios_user.json`, the input for video
-   generation. Then press **Next: test the clips →**.
+   generation. Then press **Next: test the clips**.
 
-**Page ② Generated clips & Hafnia test**
+**Page ② Clips & Hafnia test**
 
 6. Four rows, each with its camera: the three scenarios and the original camera. Click a row to watch its clip live.
 7. Type the gateway password and press **Connect**.

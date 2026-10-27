@@ -52,7 +52,7 @@ The tab has two pages, switched with the buttons at the top.
    marked "should NOT trigger". The user adds their own scenarios and **Save selection** writes the ticked ones to
    `<camera>_scenarios_user.json` (with `id`, `source`, `expected`): the input for video generation.
 
-**Page 2: Generated clips & Hafnia test**
+**Page 2: Clips & Hafnia test**
 
 4. **Generated clips in XProtect:** each saved scenario next to the XProtect camera that plays its clip, found by name
    (`<id>` or `<id>_anything`, see `xprotect-setup/README.md`), plus an **original camera** row: the snapshot camera's

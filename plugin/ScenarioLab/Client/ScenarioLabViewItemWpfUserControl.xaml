@@ -9,7 +9,7 @@
 
   Two pages, chosen with the tabs at the top (both stay in memory, only one is visible):
     Page 1 "Snapshot & scenarios":  1. Cameras | 2. Live view, frame picker, snapshot | 3. Suggested + own scenarios
-    Page 2 "Generated clips & Hafnia test":   4. Scenarios matched to their XProtect cameras + 5. Hafnia test | live view of the clip
+    Page 2 "Clips & Hafnia test":   4. Scenarios matched to their XProtect cameras + 5. Hafnia test | live view of the clip
 -->
 <platformclient:ViewItemWpfUserControl x:Class="ScenarioLab.Client.ScenarioLabViewItemWpfUserControl"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
