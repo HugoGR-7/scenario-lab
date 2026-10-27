@@ -112,6 +112,7 @@ namespace ScenarioLab.Client
             _tab2 = new VideoOSTabControlPrimaryItem { Text = "Generated clips & Hafnia test" };
             _tabs.ItemsSource = new List<VideoOSTabControlPrimaryItem> { _tab1, _tab2 };
             _tabs.SelectedItem = _tab1;
+            FitTabsToText();
 
             _rangeBox.ItemsSource = DropDownItems("Last 2 minutes", 120, "Last 10 minutes", 600, "Last hour", 3600, "Last 24 hours", 86400);
             _rangeBox.SelectedItem = FindDropDownItem(_rangeBox, 600);
@@ -144,6 +145,42 @@ namespace ScenarioLab.Client
             _rowExpectedBox.SelectedItemChanged += (s, e) => OnRowExpectedChanged();
             _cameraList.SelectionChanged += (s, e) => OnCameraSelected();
             _scenarioGrid.SelectionChanged += (s, e) => ShowRow(_scenarioGrid.SelectedItem as Scenario);
+        }
+
+        private string _tabSizeNote;   // shown in the status line if no "fit to text" size mode was found
+
+        /// <summary>
+        /// The tab strip cuts long tab titles ("Generated clips & Hafnia t..."). Its ItemSizeMode property chooses how
+        /// tabs are sized, but its values are not documented, so pick by name at run time the one that sizes each tab
+        /// to its text (a name with Content, Auto, Fit or Text in it).
+        /// </summary>
+        private void FitTabsToText()
+        {
+            try
+            {
+                var prop = _tabs.GetType().GetProperty("ItemSizeMode");
+                if (prop == null || !prop.CanWrite || !prop.PropertyType.IsEnum)
+                {
+                    return;
+                }
+                string[] names = Enum.GetNames(prop.PropertyType);
+                string pick = new[] { "Content", "Auto", "Fit", "Text" }
+                    .Select(word => names.FirstOrDefault(n => n.IndexOf(word, StringComparison.OrdinalIgnoreCase) >= 0))
+                    .FirstOrDefault(n => n != null);
+                EnvironmentManager.Instance.Log(false, "ScenarioLab", "Tab size modes: " + string.Join(", ", names) + "; using " + (pick ?? "the default"));
+                if (pick != null)
+                {
+                    prop.SetValue(_tabs, Enum.Parse(prop.PropertyType, pick));
+                }
+                else
+                {
+                    _tabSizeNote = "Tab size modes on this XProtect: " + string.Join(", ", names) + " (current: " + prop.GetValue(_tabs) + ").";
+                }
+            }
+            catch (Exception ex)
+            {
+                EnvironmentManager.Instance.Log(true, "ScenarioLab", "Tab size mode not set: " + ex.Message);
+            }
         }
 
         /// <summary>Adds a text column showing the row object's property <paramref name="property"/>.</summary>
@@ -239,7 +276,7 @@ namespace ScenarioLab.Client
                 }
                 ShowPage(_page);
                 UpdateHafniaControls();
-                SetStatus("Ready. Data folder: " + ScenarioLabDefinition.DataFolder);
+                SetStatus("Ready. Data folder: " + ScenarioLabDefinition.DataFolder + (_tabSizeNote != null ? "   " + _tabSizeNote : ""));
             }
             catch (Exception ex)
             {
