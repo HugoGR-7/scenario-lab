@@ -48,11 +48,8 @@
                 <vos:VideoOSTextBlockH2 Margin="0,0,0,8" DockPanel.Dock="Top" Text="1. Cameras"/>
                 <vos:VideoOSButtonTextMedium DockPanel.Dock="Bottom" x:Name="_refreshCamerasButton" Content="Refresh list"
                                              HorizontalAlignment="Left" Margin="0,6,0,0" Click="OnRefreshCameras"/>
-                <vos:VideoOSTable x:Name="_cameraList" IsBorderVisible="True" VerticalScrollBarVisibility="Auto">
-                    <vos:VideoOSTable.Columns>
-                        <vos:VideoOSTableTextColumn Header="CAMERA" ItemTextPropertyName="Name" Width="*" IsSortable="False"/>
-                    </vos:VideoOSTable.Columns>
-                </vos:VideoOSTable>
+                <!-- Columns are added in code: XAML cannot fill this table's Columns collection. -->
+                <vos:VideoOSTable x:Name="_cameraList" IsBorderVisible="True" VerticalScrollBarVisibility="Auto"/>
             </DockPanel>
 
             <!-- 2. Live view, then pick a recorded frame and save it as the snapshot -->
@@ -194,15 +191,7 @@
                         </StackPanel>
                     </Grid>
 
-                    <vos:VideoOSTable x:Name="_scenarioGrid" Height="230" IsBorderVisible="True" VerticalScrollBarVisibility="Auto">
-                        <vos:VideoOSTable.Columns>
-                            <vos:VideoOSTableTextColumn Header="SCENARIO" ItemTextPropertyName="Title" Width="*" IsSortable="False"/>
-                            <vos:VideoOSTableTextColumn Header="CAMERA" ItemTextPropertyName="CameraLabel" Width="Auto" IsSortable="False"/>
-                            <vos:VideoOSTableTextColumn Header="EXPECTED" ItemTextPropertyName="Expected" Width="Auto" IsSortable="False"/>
-                            <vos:VideoOSTableTextColumn Header="GOT" ItemTextPropertyName="Got" Width="Auto" IsSortable="False"/>
-                            <vos:VideoOSTableTextColumn Header="RESULT" ItemTextPropertyName="Result" Width="Auto" IsSortable="False"/>
-                        </vos:VideoOSTable.Columns>
-                    </vos:VideoOSTable>
+                    <vos:VideoOSTable x:Name="_scenarioGrid" Height="230" IsBorderVisible="True" VerticalScrollBarVisibility="Auto"/>
                     <vos:VideoOSTextBlockLabel Margin="0,10,0,4" Text="Expected for the selected clip"/>
                     <vos:VideoOSDropDownMedium x:Name="_rowExpectedBox" IsEnabled="False"/>
                     <vos:VideoOSTextBlockBodySmall TextWrapping="Wrap" Margin="0,6,0,0" Opacity="0.8"

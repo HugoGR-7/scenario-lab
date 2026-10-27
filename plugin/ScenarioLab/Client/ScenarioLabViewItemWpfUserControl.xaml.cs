@@ -124,6 +124,15 @@ namespace ScenarioLab.Client
             _windowBox.SelectedItem = FindDropDownItem(_windowBox, 10);
             _settingFromCode = false;
 
+            // Table columns (the WPF markup compiler cannot add several items to this ICollection<T> in XAML).
+            var star = new DataGridLength(1, DataGridLengthUnitType.Star);
+            AddColumn(_cameraList, "CAMERA", "Name", star);
+            AddColumn(_scenarioGrid, "SCENARIO", "Title", star);
+            AddColumn(_scenarioGrid, "CAMERA", "CameraLabel", DataGridLength.Auto);
+            AddColumn(_scenarioGrid, "EXPECTED", "Expected", DataGridLength.Auto);
+            AddColumn(_scenarioGrid, "GOT", "Got", DataGridLength.Auto);
+            AddColumn(_scenarioGrid, "RESULT", "Result", DataGridLength.Auto);
+
             _tabs.SelectedItemChanged += (s, e) =>
             {
                 if (!_settingFromCode)
@@ -135,6 +144,30 @@ namespace ScenarioLab.Client
             _rowExpectedBox.SelectedItemChanged += (s, e) => OnRowExpectedChanged();
             _cameraList.SelectionChanged += (s, e) => OnCameraSelected();
             _scenarioGrid.SelectionChanged += (s, e) => ShowRow(_scenarioGrid.SelectedItem as Scenario);
+        }
+
+        /// <summary>Adds a text column showing the row object's property <paramref name="property"/>.</summary>
+        private static void AddColumn(VideoOSTable table, string header, string property, DataGridLength width)
+        {
+            var columns = table.Columns;
+            if (columns == null)
+            {
+                // Not created by the control itself: give it a list (only if the property can be set).
+                var prop = typeof(VideoOSTable).GetProperty("Columns");
+                if (prop == null || !prop.CanWrite)
+                {
+                    return;
+                }
+                columns = new List<VideoOSTableColumnBase>();
+                prop.SetValue(table, columns);
+            }
+            columns.Add(new VideoOSTableTextColumn
+            {
+                Header = header,
+                ItemTextPropertyName = property,
+                Width = width,
+                IsSortable = false
+            });
         }
 
         /// <summary>DropDownItems("text", tag, "text", tag, ...): the shown text in Data, our value in Tag.</summary>
