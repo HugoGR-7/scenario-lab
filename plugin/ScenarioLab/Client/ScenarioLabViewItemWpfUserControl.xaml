@@ -2,9 +2,14 @@
   Layout of the Scenario Lab panel. XAML (Extensible Application Markup Language) describes WPF controls the way
   HTML describes a page; the matching .xaml.cs file holds the code. x:Name gives a control a field name in code.
 
-  Two pages, switched with the buttons at the top (both stay in memory, only one is visible):
+  The controls with the prefix "vos:" are Milestone's XProtect Design System controls (namespace
+  VideoOS.Platform.UI.Controls in VideoOS.Platform.dll): the buttons, fields, drop-downs, tables and text styles that
+  Smart Client's own workspaces use. They follow Smart Client's theme by themselves. The exact list of classes and
+  members on this XProtect version: scripts\List-UiControls.ps1.
+
+  Two pages, chosen with the tabs at the top (both stay in memory, only one is visible):
     Page 1 "Snapshot & scenarios":  1. Cameras | 2. Live view, frame picker, snapshot | 3. Suggested + own scenarios
-    Page 2 "Clips & Hafnia test":   4. Scenarios matched to their XProtect cameras + 5. Hafnia test | live view of the clip
+    Page 2 "Generated clips & Hafnia test":   4. Scenarios matched to their XProtect cameras + 5. Hafnia test | live view of the clip
 -->
 <platformclient:ViewItemWpfUserControl x:Class="ScenarioLab.Client.ScenarioLabViewItemWpfUserControl"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
@@ -12,74 +17,46 @@
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:platformclient="clr-namespace:VideoOS.Platform.Client;assembly=VideoOS.Platform"
-             xmlns:local="clr-namespace:ScenarioLab.Client"
+             xmlns:vos="clr-namespace:VideoOS.Platform.UI.Controls;assembly=VideoOS.Platform"
              mc:Ignorable="d" d:DesignHeight="700" d:DesignWidth="1200"
              PreviewMouseLeftButtonUp="OnMouseLeftUp" Background="Transparent">
-    <platformclient:ViewItemWpfUserControl.Resources>
-        <Style x:Key="StepHeader" TargetType="TextBlock">
-            <Setter Property="FontSize" Value="15"/>
-            <Setter Property="FontWeight" Value="SemiBold"/>
-            <Setter Property="Margin" Value="0,0,0,6"/>
-        </Style>
-        <Style x:Key="Hint" TargetType="TextBlock">
-            <Setter Property="Opacity" Value="0.7"/>
-            <Setter Property="TextWrapping" Value="Wrap"/>
-            <Setter Property="Margin" Value="0,4,0,0"/>
-        </Style>
-        <Style x:Key="PageButton" TargetType="Button">
-            <Setter Property="Padding" Value="14,6"/>
-            <Setter Property="Margin" Value="0,0,8,0"/>
-            <Setter Property="FontSize" Value="14"/>
-        </Style>
-        <!-- Shared look of the two tables: transparent rows, text in the panel's (theme) colour. -->
-        <Style x:Key="ThemedHeader" TargetType="DataGridColumnHeader">
-            <Setter Property="Background" Value="#30808080"/>
-            <Setter Property="Foreground" Value="{Binding Foreground, RelativeSource={RelativeSource AncestorType=DataGrid}}"/>
-            <Setter Property="Padding" Value="6,3"/>
-            <Setter Property="FontWeight" Value="SemiBold"/>
-        </Style>
-        <Style x:Key="WrapCell" TargetType="TextBlock">
-            <Setter Property="TextWrapping" Value="Wrap"/>
-            <Setter Property="Margin" Value="4,3"/>
-        </Style>
-        <Style x:Key="Cell" TargetType="TextBlock">
-            <Setter Property="Margin" Value="4,3"/>
-            <Setter Property="VerticalAlignment" Value="Center"/>
-        </Style>
-    </platformclient:ViewItemWpfUserControl.Resources>
+    <!-- No Style is set on Milestone's controls: their look may come from implicit styles, which an explicit Style
+         would replace. Margins and spacing are set on each element instead. -->
 
-    <Grid Margin="10">
+    <Grid Margin="12,4,12,10">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <!-- Page switcher -->
-        <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,10">
-            <Button x:Name="_page1Button" Style="{StaticResource PageButton}" Content="①  Snapshot &amp; scenarios" Click="OnShowPage1"/>
-            <TextBlock Text="→" VerticalAlignment="Center" Margin="0,0,8,0" Opacity="0.6" FontSize="16"/>
-            <Button x:Name="_page2Button" Style="{StaticResource PageButton}" Content="②  Generated clips &amp; Hafnia test" Click="OnShowPage2"/>
-        </StackPanel>
+        <!-- Page tabs, like Generate | History | Webhooks Setup. Items are set in code. Only the tab strip is used:
+             the pages below are ours. -->
+        <vos:VideoOSTabControlPrimaryHorizontalLarge Grid.Row="0" x:Name="_tabs" IsContentVisible="False"
+                                                     Margin="0,0,0,12" HorizontalAlignment="Left"/>
 
         <!-- ============================ PAGE 1 ============================ -->
         <Grid Grid.Row="1" x:Name="_page1">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="220"/>
+                <ColumnDefinition Width="230"/>
                 <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="430"/>
+                <ColumnDefinition Width="440"/>
             </Grid.ColumnDefinitions>
 
             <!-- 1. Cameras -->
-            <DockPanel Grid.Column="0" Margin="0,0,10,0">
-                <TextBlock DockPanel.Dock="Top" Style="{StaticResource StepHeader}" Text="1. Cameras"/>
-                <Button Padding="10,4" DockPanel.Dock="Bottom" x:Name="_refreshCamerasButton" Content="Refresh list"
-                        HorizontalAlignment="Left" Margin="0,6,0,0" Click="OnRefreshCameras"/>
-                <ListBox x:Name="_cameraList" DisplayMemberPath="Name" SelectionChanged="OnCameraSelected"/>
+            <DockPanel Grid.Column="0" Margin="0,0,16,0">
+                <vos:VideoOSTextBlockH2 Margin="0,0,0,8" DockPanel.Dock="Top" Text="1. Cameras"/>
+                <vos:VideoOSButtonTextMedium DockPanel.Dock="Bottom" x:Name="_refreshCamerasButton" Content="Refresh list"
+                                             HorizontalAlignment="Left" Margin="0,6,0,0" Click="OnRefreshCameras"/>
+                <vos:VideoOSTable x:Name="_cameraList" IsBorderVisible="True" VerticalScrollBarVisibility="Auto">
+                    <vos:VideoOSTable.Columns>
+                        <vos:VideoOSTableTextColumn Header="CAMERA" ItemTextPropertyName="Name" Width="*" IsSortable="False"/>
+                    </vos:VideoOSTable.Columns>
+                </vos:VideoOSTable>
             </DockPanel>
 
             <!-- 2. Live view, then pick a recorded frame and save it as the snapshot -->
-            <Grid Grid.Column="1" Margin="0,0,10,0">
+            <Grid Grid.Column="1" Margin="0,0,16,0">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="2*"/>
@@ -89,109 +66,101 @@
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
-                <TextBlock Grid.Row="0" Style="{StaticResource StepHeader}" Text="2. Live view"/>
+                <vos:VideoOSTextBlockH2 Margin="0,0,0,8" Grid.Row="0" Text="2. Snapshot through XProtect"/>
                 <!-- The XProtect image viewer is created in code (it needs this view item's WindowInformation). -->
-                <Grid Grid.Row="1" x:Name="_liveViewHost" Background="#20000000">
-                    <TextBlock x:Name="_liveViewPlaceholder" Text="Select a camera on the left"
-                               HorizontalAlignment="Center" VerticalAlignment="Center" Style="{StaticResource Hint}"/>
-                </Grid>
+                <vos:VideoOSPanel Grid.Row="1" IsBorderVisible="True">
+                    <Grid x:Name="_liveViewHost">
+                        <vos:VideoOSTextBlockEmptyState x:Name="_liveViewPlaceholder" Text="Select a camera on the left"
+                                                        HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Grid>
+                </vos:VideoOSPanel>
 
-                <TextBlock Grid.Row="2" Style="{StaticResource StepHeader}" Margin="0,12,0,6"
-                           Text="Pick a frame from the recording (original resolution)"/>
-                <Border Grid.Row="3" BorderThickness="1" BorderBrush="#40808080" Background="#20000000">
+                <vos:VideoOSTextBlockLabel Grid.Row="2" Margin="0,14,0,4"
+                                           Text="Frame from the recording (original resolution)"/>
+                <vos:VideoOSPanel Grid.Row="3" IsBorderVisible="True">
                     <Grid>
                         <Image x:Name="_frameImage" Stretch="Uniform"/>
-                        <TextBlock x:Name="_framePlaceholder" Text="The recorded frame appears here"
-                                   HorizontalAlignment="Center" VerticalAlignment="Center" Style="{StaticResource Hint}"/>
+                        <vos:VideoOSTextBlockEmptyState x:Name="_framePlaceholder" Text="The recorded frame appears here"
+                                                        HorizontalAlignment="Center" VerticalAlignment="Center"/>
                     </Grid>
-                </Border>
+                </vos:VideoOSPanel>
 
                 <!-- Slider: seconds relative to "now" (when the camera was picked or Now was pressed). 0 = latest. -->
-                <DockPanel Grid.Row="4" Margin="0,8,0,0">
-                    <ComboBox DockPanel.Dock="Right" x:Name="_rangeBox" Width="130" Margin="8,0,0,0"
-                              SelectionChanged="OnRangeChanged">
-                        <ComboBoxItem Content="Last 2 minutes" Tag="120"/>
-                        <ComboBoxItem Content="Last 10 minutes" Tag="600" IsSelected="True"/>
-                        <ComboBoxItem Content="Last hour" Tag="3600"/>
-                        <ComboBoxItem Content="Last 24 hours" Tag="86400"/>
-                    </ComboBox>
+                <DockPanel Grid.Row="4" Margin="0,10,0,0">
+                    <vos:VideoOSDropDownMedium DockPanel.Dock="Right" x:Name="_rangeBox" Width="150" Margin="10,0,0,0"/>
                     <Slider x:Name="_timeSlider" Minimum="-600" Maximum="0" Value="0" IsEnabled="False"
                             IsMoveToPointEnabled="True" VerticalAlignment="Center" ValueChanged="OnSliderChanged"/>
                 </DockPanel>
-                <DockPanel Grid.Row="5" Margin="0,6,0,0">
+                <DockPanel Grid.Row="5" Margin="0,8,0,0">
                     <StackPanel DockPanel.Dock="Left" Orientation="Horizontal">
-                        <Button Padding="10,4" Margin="0,0,6,0" x:Name="_prevFrameButton" Content="◀ Frame" IsEnabled="False"
-                                ToolTip="Previous recorded frame" Click="OnPreviousFrame"/>
-                        <Button Padding="10,4" Margin="0,0,6,0" x:Name="_nextFrameButton" Content="Frame ▶" IsEnabled="False"
-                                ToolTip="Next recorded frame" Click="OnNextFrame"/>
-                        <Button Padding="10,4" Margin="0,0,12,0" x:Name="_nowButton" Content="Now" IsEnabled="False"
-                                ToolTip="Jump to the latest recorded frame" Click="OnNow"/>
+                        <vos:VideoOSButtonSecondaryMedium Margin="0,0,8,0" x:Name="_prevFrameButton" Content="◀ Frame"
+                                                          IsEnabled="False" ToolTip="Previous recorded frame" Click="OnPreviousFrame"/>
+                        <vos:VideoOSButtonSecondaryMedium Margin="0,0,8,0" x:Name="_nextFrameButton" Content="Frame ▶"
+                                                          IsEnabled="False" ToolTip="Next recorded frame" Click="OnNextFrame"/>
+                        <vos:VideoOSButtonSecondaryMedium Margin="0,0,12,0" x:Name="_nowButton" Content="Now"
+                                                          IsEnabled="False" ToolTip="Jump to the latest recorded frame" Click="OnNow"/>
                     </StackPanel>
-                    <TextBlock x:Name="_frameTimeText" VerticalAlignment="Center" Text="" Opacity="0.85"/>
+                    <vos:VideoOSTextBlockBodySmall x:Name="_frameTimeText" VerticalAlignment="Center" Text=""/>
                 </DockPanel>
-                <StackPanel Grid.Row="6" Margin="0,8,0,0">
+                <StackPanel Grid.Row="6" Margin="0,12,0,0">
                     <StackPanel Orientation="Horizontal">
-                        <Button Padding="10,4" Margin="0,0,6,0" x:Name="_snapshotButton" Content="Save this frame as snapshot"
-                                IsEnabled="False" Click="OnTakeSnapshot"/>
-                        <Button Padding="10,4" Margin="0,0,6,0" Content="Open snapshot folder" Click="OnOpenSnapshotFolder"/>
+                        <vos:VideoOSButtonPrimaryMedium Margin="0,0,8,0" x:Name="_snapshotButton" Content="Save this frame as snapshot"
+                                                        IsEnabled="False" Click="OnTakeSnapshot"/>
+                        <vos:VideoOSButtonTextMedium Content="Open snapshot folder" Click="OnOpenSnapshotFolder"/>
                     </StackPanel>
-                    <TextBlock x:Name="_snapshotInfo" Style="{StaticResource Hint}" Text="No snapshot yet."/>
+                    <vos:VideoOSTextBlockBodySmall TextWrapping="Wrap" Margin="0,6,0,0" Opacity="0.8" x:Name="_snapshotInfo" Text="No snapshot yet."/>
                 </StackPanel>
             </Grid>
 
             <!-- 3. Scenarios for this snapshot: prepared suggestions to tick, plus the user's own -->
             <DockPanel Grid.Column="2">
                 <StackPanel DockPanel.Dock="Top">
-                    <TextBlock Style="{StaticResource StepHeader}" Text="3. Scenarios for this snapshot"/>
+                    <vos:VideoOSTextBlockH2 Margin="0,0,0,8" Text="3. Scenarios for this snapshot"/>
                     <StackPanel Orientation="Horizontal">
-                        <Button Padding="10,4" Margin="0,0,6,0" x:Name="_loadSuggestionsButton" Content="Load suggestions"
-                                IsEnabled="False" Click="OnLoadSuggestions"
-                                ToolTip="Reads C:\ScenarioLab\suggestions\&lt;camera&gt;_scenarios.json, made from this snapshot by the scene-analysis model."/>
-                        <Button Padding="10,4" Margin="0,0,6,0" Content="Open suggestions folder" Click="OnOpenSuggestionsFolder"/>
+                        <vos:VideoOSButtonSecondaryMedium Margin="0,0,8,0" x:Name="_loadSuggestionsButton" Content="Load suggestions"
+                                                          IsEnabled="False" Click="OnLoadSuggestions"
+                                                          ToolTip="Reads C:\ScenarioLab\suggestions\&lt;camera&gt;_scenarios.json, made from this snapshot by the scene-analysis model."/>
+                        <vos:VideoOSButtonTextMedium Content="Open suggestions folder" Click="OnOpenSuggestionsFolder"/>
                     </StackPanel>
-                    <TextBlock x:Name="_suggestionsInfo" Style="{StaticResource Hint}"
-                               Text="Save a snapshot first. The scene-analysis model reads it and proposes edge cases for this view."/>
+                    <vos:VideoOSTextBlockBodySmall TextWrapping="Wrap" Margin="0,6,0,0" Opacity="0.8" x:Name="_suggestionsInfo"
+                                                   Text="Save a snapshot first. The scene-analysis model reads it and proposes edge cases for this view."/>
                 </StackPanel>
 
-                <StackPanel DockPanel.Dock="Bottom" Margin="0,8,0,0">
-                    <TextBlock Text="Add your own scenario" Margin="0,0,0,2"/>
-                    <TextBox x:Name="_ownScenarioText" Height="52" AcceptsReturn="False" TextWrapping="Wrap"
-                             VerticalScrollBarVisibility="Auto" IsEnabled="False"/>
-                    <DockPanel Margin="0,6,0,0">
-                        <Button DockPanel.Dock="Right" Padding="10,4" Margin="6,0,0,0" x:Name="_addOwnButton" Content="Add"
-                                IsEnabled="False" Click="OnAddOwnScenario"/>
-                        <ComboBox x:Name="_ownExpectedBox" IsEnabled="False">
-                            <ComboBoxItem Content="Should trigger the alarm" Tag="detect" IsSelected="True"/>
-                            <ComboBoxItem Content="Should NOT trigger the alarm (harmless)" Tag="no detect"/>
-                        </ComboBox>
+                <StackPanel DockPanel.Dock="Bottom">
+                    <vos:VideoOSTextBlockLabel Margin="0,10,0,4" Text="Add your own scenario"/>
+                    <vos:VideoOSTextBoxMedium x:Name="_ownScenarioText" IsEnabled="False"
+                                              PlaceholderText="e.g. A person sprays graffiti on the wall"/>
+                    <DockPanel Margin="0,8,0,0">
+                        <vos:VideoOSButtonSecondaryMedium DockPanel.Dock="Right" Margin="8,0,0,0" x:Name="_addOwnButton"
+                                                          Content="Add" IsEnabled="False" Click="OnAddOwnScenario"/>
+                        <vos:VideoOSDropDownMedium x:Name="_ownExpectedBox" IsEnabled="False"/>
                     </DockPanel>
-                    <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
-                        <Button Padding="10,4" Margin="0,0,6,0" x:Name="_saveSelectionButton" Content="Save selection"
-                                IsEnabled="False" Click="OnSaveSelection"/>
-                        <Button Padding="10,4" Margin="0,0,6,0" x:Name="_nextPageButton" Content="Next: test the clips →"
-                                IsEnabled="False" Click="OnShowPage2"/>
+                    <StackPanel Orientation="Horizontal" Margin="0,16,0,0" HorizontalAlignment="Right">
+                        <vos:VideoOSButtonSecondaryMedium Margin="0,0,8,0" x:Name="_saveSelectionButton" Content="Save selection"
+                                                          IsEnabled="False" Click="OnSaveSelection"/>
+                        <vos:VideoOSButtonPrimaryMedium x:Name="_nextPageButton" Content="Next: test the clips"
+                                                        IsEnabled="False" Click="OnShowPage2"/>
                     </StackPanel>
-                    <TextBlock x:Name="_selectionInfo" Style="{StaticResource Hint}"
-                               Text="Saving writes the ticked scenarios to &lt;camera&gt;_scenarios_user.json: the input for video generation."/>
+                    <vos:VideoOSTextBlockBodySmall TextWrapping="Wrap" Margin="0,6,0,0" Opacity="0.8" x:Name="_selectionInfo"
+                                                   Text="Saving writes the ticked scenarios to &lt;camera&gt;_scenarios_user.json: the input for video generation."/>
                 </StackPanel>
 
-                <Border BorderThickness="1" BorderBrush="#40808080" Background="#10000000" Margin="0,8,0,0">
-                    <ScrollViewer VerticalScrollBarVisibility="Auto">
-                        <ItemsControl x:Name="_suggestionList" Margin="6">
+                <vos:VideoOSPanel IsBorderVisible="True" Margin="0,10,0,0">
+                    <vos:VideoOSScrollViewer VerticalScrollBarVisibility="Auto">
+                        <ItemsControl x:Name="_suggestionList" Margin="10,6">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>
-                                    <CheckBox IsChecked="{Binding IsSelected, Mode=TwoWay}" Margin="0,4,0,6"
-                                              VerticalContentAlignment="Top">
-                                        <StackPanel Margin="4,0,0,0">
-                                            <TextBlock Text="{Binding Title}" TextWrapping="Wrap"/>
-                                            <TextBlock Text="{Binding Details}" TextWrapping="Wrap" Opacity="0.65" FontSize="11"/>
-                                        </StackPanel>
-                                    </CheckBox>
+                                    <StackPanel Margin="0,6,0,6">
+                                        <vos:VideoOSCheckBoxMedium IsChecked="{Binding IsSelected, Mode=TwoWay}"
+                                                                   Content="{Binding Title}" MaxLines="3"/>
+                                        <vos:VideoOSTextBlockBodySmall Text="{Binding Details}" TextWrapping="Wrap"
+                                                                       Margin="28,2,0,0" Opacity="0.75"/>
+                                    </StackPanel>
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>
-                    </ScrollViewer>
-                </Border>
+                    </vos:VideoOSScrollViewer>
+                </vos:VideoOSPanel>
             </DockPanel>
         </Grid>
 
@@ -202,89 +171,74 @@
                 <ColumnDefinition Width="9*"/>
             </Grid.ColumnDefinitions>
 
-            <ScrollViewer Grid.Column="0" VerticalScrollBarVisibility="Auto" Margin="0,0,12,0">
-                <StackPanel>
+            <vos:VideoOSScrollViewer Grid.Column="0" VerticalScrollBarVisibility="Auto" Margin="0,0,16,0">
+                <StackPanel Margin="0,0,8,0">
                     <!-- 4. The chosen scenarios, each matched to the XProtect camera that plays its generated clip -->
-                    <TextBlock Style="{StaticResource StepHeader}" Text="4. Generated clips in XProtect"/>
-                    <Grid Margin="0,0,0,8">
+                    <vos:VideoOSTextBlockH2 Margin="0,0,0,8" Text="4. Generated clips in XProtect"/>
+                    <Grid Margin="0,0,0,10">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto"/>
                             <ColumnDefinition Width="*"/>
                         </Grid.ColumnDefinitions>
-                        <Border BorderThickness="1" BorderBrush="#40808080" Background="#20000000" Width="168" Height="98">
+                        <vos:VideoOSPanel IsBorderVisible="True" Width="168" Height="98">
                             <Image x:Name="_snapshotThumb" Stretch="Uniform"/>
-                        </Border>
-                        <StackPanel Grid.Column="1" Margin="10,0,0,0">
-                            <TextBlock x:Name="_selectionSummary" TextWrapping="Wrap" Text="No selection loaded yet."/>
+                        </vos:VideoOSPanel>
+                        <StackPanel Grid.Column="1" Margin="12,0,0,0">
+                            <vos:VideoOSTextBlockBodyMedium x:Name="_selectionSummary" TextWrapping="Wrap" Text="No selection loaded yet."/>
                             <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
-                                <Button Padding="10,4" Margin="0,0,6,0" Content="Reload selection" Click="OnReloadSelection"
-                                        ToolTip="Reads the newest *_scenarios_user.json in C:\ScenarioLab\suggestions"/>
-                                <Button Padding="10,4" Margin="0,0,6,0" Content="Find cameras again" Click="OnMatchCameras"
-                                        ToolTip="Looks again for XProtect cameras named after each scenario ID"/>
+                                <vos:VideoOSButtonTextMedium Margin="0,0,12,0" Content="Reload selection" Click="OnReloadSelection"
+                                                             ToolTip="Reads the newest *_scenarios_user.json in C:\ScenarioLab\suggestions"/>
+                                <vos:VideoOSButtonTextMedium Content="Find cameras again" Click="OnMatchCameras"
+                                                             ToolTip="Looks again for XProtect cameras named after each scenario ID"/>
                             </StackPanel>
                         </StackPanel>
                     </Grid>
 
-                    <DataGrid x:Name="_scenarioGrid" Height="210" AutoGenerateColumns="False" IsReadOnly="True"
-                              HeadersVisibility="Column" SelectionMode="Single" SelectionChanged="OnScenarioRowSelected"
-                              Background="Transparent" RowBackground="Transparent" AlternatingRowBackground="#14808080"
-                              GridLinesVisibility="Horizontal" HorizontalGridLinesBrush="#40808080" BorderBrush="#40808080"
-                              ColumnHeaderStyle="{StaticResource ThemedHeader}">
-                        <DataGrid.Columns>
-                            <DataGridTextColumn Header="Scenario" Binding="{Binding Title}" Width="*"
-                                                ElementStyle="{StaticResource WrapCell}"/>
-                            <DataGridTextColumn Header="Camera" Binding="{Binding CameraLabel}" Width="Auto"
-                                                ElementStyle="{StaticResource Cell}"/>
-                            <!-- A live drop-down in a read-only grid: it edits the row object directly (no edit mode). -->
-                            <DataGridTemplateColumn Header="Expected" Width="96">
-                                <DataGridTemplateColumn.CellTemplate>
-                                    <DataTemplate>
-                                        <ComboBox ItemsSource="{x:Static local:Scenario.ExpectedChoices}" Margin="2"
-                                                  SelectedItem="{Binding Expected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
-                                    </DataTemplate>
-                                </DataGridTemplateColumn.CellTemplate>
-                            </DataGridTemplateColumn>
-                            <DataGridTextColumn Header="Got" Binding="{Binding Got}" Width="Auto" ElementStyle="{StaticResource Cell}"/>
-                            <DataGridTextColumn Header="Result" Binding="{Binding Result}" Width="Auto" ElementStyle="{StaticResource Cell}"/>
-                        </DataGrid.Columns>
-                    </DataGrid>
-                    <TextBlock Style="{StaticResource Hint}"
-                               Text="Click a row to watch its camera on the right. Each clip is an ordinary XProtect camera named after the scenario ID (for example vandalism_s1_rock_window). The last row is the original camera's real recording from the snapshot moment: set its Expected to what really happens there."/>
+                    <vos:VideoOSTable x:Name="_scenarioGrid" Height="230" IsBorderVisible="True" VerticalScrollBarVisibility="Auto">
+                        <vos:VideoOSTable.Columns>
+                            <vos:VideoOSTableTextColumn Header="SCENARIO" ItemTextPropertyName="Title" Width="*" IsSortable="False"/>
+                            <vos:VideoOSTableTextColumn Header="CAMERA" ItemTextPropertyName="CameraLabel" Width="Auto" IsSortable="False"/>
+                            <vos:VideoOSTableTextColumn Header="EXPECTED" ItemTextPropertyName="Expected" Width="Auto" IsSortable="False"/>
+                            <vos:VideoOSTableTextColumn Header="GOT" ItemTextPropertyName="Got" Width="Auto" IsSortable="False"/>
+                            <vos:VideoOSTableTextColumn Header="RESULT" ItemTextPropertyName="Result" Width="Auto" IsSortable="False"/>
+                        </vos:VideoOSTable.Columns>
+                    </vos:VideoOSTable>
+                    <vos:VideoOSTextBlockLabel Margin="0,10,0,4" Text="Expected for the selected clip"/>
+                    <vos:VideoOSDropDownMedium x:Name="_rowExpectedBox" IsEnabled="False"/>
+                    <vos:VideoOSTextBlockBodySmall TextWrapping="Wrap" Margin="0,6,0,0" Opacity="0.8"
+                                                   Text="Click a row to watch its camera on the right. Each clip is an ordinary XProtect camera named after the scenario ID (for example vandalism_s1_rock_window). The last row is the original camera's real recording from the snapshot moment: set its Expected to what really happens there."/>
 
                     <!-- 5. Test a detection question with Hafnia VLM -->
-                    <TextBlock Style="{StaticResource StepHeader}" Text="5. Test with Hafnia" Margin="0,18,0,6"/>
+                    <vos:VideoOSTextBlockH2 Text="5. Test with Hafnia" Margin="0,22,0,8"/>
+                    <vos:VideoOSTextBlockLabel Margin="0,0,0,4" Text="Gateway password"/>
                     <DockPanel>
-                        <Button DockPanel.Dock="Right" Padding="10,4" Margin="6,0,0,0" x:Name="_connectButton"
-                                Content="Connect" Click="OnConnectHafnia"/>
-                        <PasswordBox x:Name="_gatewayPassword" VerticalContentAlignment="Center"
-                                     ToolTip="Hafnia gateway password (administrator = your Windows password). Kept in memory only."/>
+                        <vos:VideoOSButtonSecondaryMedium DockPanel.Dock="Right" Margin="8,0,0,0" x:Name="_connectButton"
+                                                          Content="Connect" Click="OnConnectHafnia"/>
+                        <vos:VideoOSPasswordBoxMedium x:Name="_gatewayPassword"
+                                                      PlaceholderText="Windows Administrator password, kept in memory only"/>
                     </DockPanel>
-                    <TextBlock x:Name="_hafniaState" Style="{StaticResource Hint}"
-                               Text="Not connected. Type the gateway password (your Windows password) and press Connect. It is never saved."/>
+                    <vos:VideoOSTextBlockBodySmall TextWrapping="Wrap" Margin="0,6,0,0" Opacity="0.8" x:Name="_hafniaState"
+                                                   Text="Not connected. Type the gateway password (your Windows password) and press Connect. It is never saved."/>
 
-                    <TextBlock Text="Detection question (the same question for every clip)" Margin="0,10,0,2"/>
-                    <TextBox x:Name="_detectionQuestion" Height="56" AcceptsReturn="True" TextWrapping="Wrap"
-                             VerticalScrollBarVisibility="Auto"
-                             Text="Is someone vandalising the building in this video, for example breaking a window or painting on the wall?"/>
-                    <DockPanel Margin="0,6,0,0">
-                        <ComboBox DockPanel.Dock="Right" x:Name="_windowBox" Width="120" Margin="6,0,0,0"
-                                  ToolTip="Length of recording sent to Hafnia for each clip">
-                            <ComboBoxItem Content="10 seconds" Tag="10" IsSelected="True"/>
-                            <ComboBoxItem Content="20 seconds" Tag="20"/>
-                            <ComboBoxItem Content="30 seconds" Tag="30"/>
-                        </ComboBox>
-                        <StackPanel Orientation="Horizontal">
-                            <Button x:Name="_runSelectedButton" Padding="10,4" Margin="0,0,6,0" Content="Run selected"
-                                    IsEnabled="False" Click="OnRunSelected"/>
-                            <Button x:Name="_runAllButton" Padding="10,4" Margin="0,0,6,0" Content="Run all"
-                                    IsEnabled="False" Click="OnRunAll"/>
+                    <vos:VideoOSTextBlockLabel Margin="0,10,0,4" Text="Detection question (the same question for every clip)"/>
+                    <vos:VideoOSTextBoxMedium x:Name="_detectionQuestion" Height="64" AcceptsReturn="True" TextWrapping="Wrap"
+                                              VerticalContentAlignment="Top" VerticalScrollBarVisibility="Auto"
+                                              Text="Is someone vandalising the building in this video, for example breaking a window or painting on the wall?"/>
+                    <vos:VideoOSTextBlockLabel Margin="0,10,0,4" Text="Recording sent per clip"/>
+                    <DockPanel>
+                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                            <vos:VideoOSButtonSecondaryMedium x:Name="_runSelectedButton" Margin="8,0,0,0" Content="Run selected"
+                                                              IsEnabled="False" Click="OnRunSelected"/>
+                            <vos:VideoOSButtonPrimaryMedium x:Name="_runAllButton" Margin="8,0,0,0" Content="Run all"
+                                                            IsEnabled="False" Click="OnRunAll"/>
                         </StackPanel>
+                        <vos:VideoOSDropDownMedium x:Name="_windowBox" Width="140" HorizontalAlignment="Left"/>
                     </DockPanel>
-                    <TextBlock x:Name="_requestHint" Style="{StaticResource Hint}"
-                               Text="1 Hafnia request per clip. Generated clips: the latest recorded seconds of their camera (the clip loops). Original camera: from the snapshot moment."/>
-                    <TextBlock x:Name="_runProgress" Margin="0,6,0,0" TextWrapping="Wrap"/>
+                    <vos:VideoOSTextBlockBodySmall TextWrapping="Wrap" Margin="0,6,0,0" Opacity="0.8" x:Name="_requestHint"
+                                                   Text="1 Hafnia request per clip. Generated clips: the latest recorded seconds of their camera (the clip loops). Original camera: from the snapshot moment."/>
+                    <vos:VideoOSTextBlockBodyMedium x:Name="_runProgress" Margin="0,8,0,0" TextWrapping="Wrap"/>
                 </StackPanel>
-            </ScrollViewer>
+            </vos:VideoOSScrollViewer>
 
             <!-- Right: the selected clip, live from XProtect, and Hafnia's answer -->
             <Grid Grid.Column="1">
@@ -293,24 +247,26 @@
                     <RowDefinition Height="*"/>
                     <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
-                <TextBlock Grid.Row="0" Style="{StaticResource StepHeader}" x:Name="_clipViewTitle" Text="Selected clip, live from XProtect"/>
-                <Grid Grid.Row="1" x:Name="_clipViewHost" Background="#20000000" MinHeight="200">
-                    <TextBlock x:Name="_clipViewPlaceholder" Text="Select a scenario on the left"
-                               HorizontalAlignment="Center" VerticalAlignment="Center" Style="{StaticResource Hint}"/>
-                </Grid>
-                <StackPanel Grid.Row="2" Margin="0,10,0,0">
-                    <TextBlock Style="{StaticResource StepHeader}" Text="Hafnia's answer"/>
-                    <Border BorderThickness="1" BorderBrush="#40808080" Padding="8" MinHeight="70">
-                        <TextBlock x:Name="_hafniaAnswer" TextWrapping="Wrap" Opacity="0.9"
-                                   Text="The answer for the selected scenario appears here."/>
-                    </Border>
-                    <TextBlock Style="{StaticResource Hint}"
-                               Text="'detected' also raises the XProtect alarm 'Scenario Lab: scenario detected' through the gateway rule. It can take a few minutes to appear in Alarm Manager."/>
+                <vos:VideoOSTextBlockH2 Margin="0,0,0,8" Grid.Row="0" x:Name="_clipViewTitle" Text="Selected clip, live from XProtect"/>
+                <vos:VideoOSPanel Grid.Row="1" IsBorderVisible="True" MinHeight="200">
+                    <Grid x:Name="_clipViewHost">
+                        <vos:VideoOSTextBlockEmptyState x:Name="_clipViewPlaceholder" Text="Select a scenario on the left"
+                                                        HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Grid>
+                </vos:VideoOSPanel>
+                <StackPanel Grid.Row="2" Margin="0,14,0,0">
+                    <vos:VideoOSTextBlockLabel Margin="0,0,0,4" Text="Hafnia's answer"/>
+                    <vos:VideoOSPanel IsBorderVisible="True" MinHeight="70">
+                        <vos:VideoOSTextBlockBodyMedium x:Name="_hafniaAnswer" TextWrapping="Wrap" Margin="10,8"
+                                                        Text="The answer for the selected scenario appears here."/>
+                    </vos:VideoOSPanel>
+                    <vos:VideoOSTextBlockBodySmall TextWrapping="Wrap" Margin="0,6,0,0" Opacity="0.8"
+                                                   Text="'detected' also raises the XProtect alarm 'Scenario Lab: scenario detected' through the gateway rule. It can take a few minutes to appear in Alarm Manager."/>
                 </StackPanel>
             </Grid>
         </Grid>
 
         <!-- Status line -->
-        <TextBlock Grid.Row="2" x:Name="_status" Margin="0,8,0,0" TextWrapping="Wrap" Opacity="0.85"/>
+        <vos:VideoOSTextBlockBodySmall Grid.Row="2" x:Name="_status" Margin="0,10,0,0" TextWrapping="Wrap" Opacity="0.85"/>
     </Grid>
 </platformclient:ViewItemWpfUserControl>

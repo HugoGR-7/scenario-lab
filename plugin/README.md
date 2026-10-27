@@ -68,6 +68,14 @@ The tab has two pages, switched with the buttons at the top.
 **Hafnia requests:** only from the Run buttons, one per clip, never on a timer, and refused once 450 of the 500 daily
 requests are used.
 
+## Look and feel
+
+The panel uses Milestone's own **XProtect Design System** controls (namespace `VideoOS.Platform.UI.Controls` in
+`VideoOS.Platform.dll`): tabs, primary/secondary/text buttons, text and password boxes, drop-downs, tables, panels and
+text styles, the same ones Smart Client's workspaces use. They follow Smart Client's dark/light theme by themselves.
+Milestone's online reference truncates the list of these classes; `scripts\List-UiControls.ps1` prints the full list
+with each class's members from the DLL on the machine.
+
 ## Where the code comes from
 
 Every XProtect call follows a Milestone sample in

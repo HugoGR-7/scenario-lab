@@ -60,7 +60,12 @@ namespace ScenarioLab.Client
         }
 
         // ---- Page 2: the XProtect camera playing this scenario's clip, and the latest test ----
-        public Item Camera { get; set; }        // null when no camera with a matching name exists yet
+        private Item _camera;                   // null when no camera with a matching name exists yet
+        public Item Camera
+        {
+            get { return _camera; }
+            set { _camera = value; Changed("Camera"); Changed("CameraLabel"); }
+        }
 
         public string CameraLabel
         {

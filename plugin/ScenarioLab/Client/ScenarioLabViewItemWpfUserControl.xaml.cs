@@ -16,6 +16,7 @@ using System.Windows.Media.Imaging;
 using VideoOS.Platform;
 using VideoOS.Platform.Client;
 using VideoOS.Platform.Messaging;
+using VideoOS.Platform.UI.Controls;
 using ScenarioLab.Hafnia;
 // Aliases: WPF and Windows Forms both have types called Image; we name the drawing ones explicitly.
 using Bitmap = System.Drawing.Bitmap;
@@ -88,10 +89,75 @@ namespace ScenarioLab.Client
         private bool _closed;
         private object _themeChangedReceiver;
 
+        // Milestone design-system controls that take their items from code (see the .xaml file).
+        private VideoOSTabControlPrimaryItem _tab1, _tab2;
+        private bool _settingFromCode;          // true while code (not the user) changes a tab or drop-down
+        private Scenario _shownRow;             // the page-2 row whose clip and answer are on screen
+
         public ScenarioLabViewItemWpfUserControl()
         {
             InitializeComponent();   // builds the controls described in the .xaml file
             ClientControl.Instance.RegisterUIControlForAutoTheming(this);   // follow Smart Client's dark/light theme
+            SetUpDesignSystemControls();
+        }
+
+        /// <summary>
+        /// Items and events of Milestone's tab strip, drop-downs and tables. Their events are hooked up here, in code,
+        /// with lambdas, so the code does not depend on each event's exact argument type.
+        /// </summary>
+        private void SetUpDesignSystemControls()
+        {
+            _settingFromCode = true;
+            _tab1 = new VideoOSTabControlPrimaryItem { Text = "Snapshot & scenarios" };
+            _tab2 = new VideoOSTabControlPrimaryItem { Text = "Generated clips & Hafnia test" };
+            _tabs.ItemsSource = new List<VideoOSTabControlPrimaryItem> { _tab1, _tab2 };
+            _tabs.SelectedItem = _tab1;
+
+            _rangeBox.ItemsSource = DropDownItems("Last 2 minutes", 120, "Last 10 minutes", 600, "Last hour", 3600, "Last 24 hours", 86400);
+            _rangeBox.SelectedItem = FindDropDownItem(_rangeBox, 600);
+            _ownExpectedBox.ItemsSource = DropDownItems("Should trigger the alarm", Scenario.Detect,
+                                                        "Should NOT trigger the alarm (harmless)", Scenario.NoDetect);
+            _ownExpectedBox.SelectedItem = FindDropDownItem(_ownExpectedBox, Scenario.Detect);
+            _rowExpectedBox.ItemsSource = DropDownItems("Should trigger the alarm (detect)", Scenario.Detect,
+                                                        "Should NOT trigger the alarm (no detect)", Scenario.NoDetect);
+            _windowBox.ItemsSource = DropDownItems("10 seconds", 10, "20 seconds", 20, "30 seconds", 30);
+            _windowBox.SelectedItem = FindDropDownItem(_windowBox, 10);
+            _settingFromCode = false;
+
+            _tabs.SelectedItemChanged += (s, e) =>
+            {
+                if (!_settingFromCode)
+                {
+                    ShowPage(_tabs.SelectedItem == _tab2 ? 2 : 1);
+                }
+            };
+            _rangeBox.SelectedItemChanged += (s, e) => OnRangeChanged();
+            _rowExpectedBox.SelectedItemChanged += (s, e) => OnRowExpectedChanged();
+            _cameraList.SelectionChanged += (s, e) => OnCameraSelected();
+            _scenarioGrid.SelectionChanged += (s, e) => ShowRow(_scenarioGrid.SelectedItem as Scenario);
+        }
+
+        /// <summary>DropDownItems("text", tag, "text", tag, ...): the shown text in Data, our value in Tag.</summary>
+        private static List<VideoOSDropDownItem> DropDownItems(params object[] textAndTag)
+        {
+            var items = new List<VideoOSDropDownItem>();
+            for (int i = 0; i + 1 < textAndTag.Length; i += 2)
+            {
+                items.Add(new VideoOSDropDownItem { Data = textAndTag[i], Tag = textAndTag[i + 1] });
+            }
+            return items;
+        }
+
+        private static VideoOSDropDownItem FindDropDownItem(VideoOSDropDownMedium box, object tag)
+        {
+            var items = box.ItemsSource as IEnumerable<VideoOSDropDownItem>;
+            return items == null ? null : items.FirstOrDefault(i => Equals(i.Tag, tag));
+        }
+
+        private static object SelectedTag(VideoOSDropDownMedium box)
+        {
+            var item = box.SelectedItem as VideoOSDropDownItem;
+            return item != null ? item.Tag : null;
         }
 
         /// <summary>Called by Smart Client right after the panel is shown.</summary>
@@ -228,8 +294,9 @@ namespace ScenarioLab.Client
             _page = page;
             _page1.Visibility = page == 1 ? Visibility.Visible : Visibility.Collapsed;
             _page2.Visibility = page == 2 ? Visibility.Visible : Visibility.Collapsed;
-            _page1Button.FontWeight = page == 1 ? FontWeights.Bold : FontWeights.Normal;
-            _page2Button.FontWeight = page == 2 ? FontWeights.Bold : FontWeights.Normal;
+            _settingFromCode = true;
+            _tabs.SelectedItem = page == 2 ? _tab2 : _tab1;
+            _settingFromCode = false;
 
             if (page == 1)
             {
@@ -250,11 +317,12 @@ namespace ScenarioLab.Client
                 var row = _scenarioGrid.SelectedItem as Scenario;
                 if (row != null)
                 {
-                    ConnectClipView(row.Camera);
+                    _shownRow = null;   // reconnect its clip view: it was disconnected while page 1 was shown
+                    ShowRow(row);
                 }
                 else if (_rows.Count > 0)
                 {
-                    _scenarioGrid.SelectedIndex = 0;   // shows the first clip right away
+                    SelectRow(_rows[0]);   // shows the first clip right away
                 }
             }
         }
@@ -300,7 +368,7 @@ namespace ScenarioLab.Client
             }
         }
 
-        private void OnCameraSelected(object sender, SelectionChangedEventArgs e)
+        private void OnCameraSelected()
         {
             var camera = _cameraList.SelectedItem as Item;   // "as" = cast, or null if it is not an Item
             if (camera == null || _imageViewer == null)
@@ -369,9 +437,8 @@ namespace ScenarioLab.Client
         {
             get
             {
-                var item = _rangeBox.SelectedItem as ComboBoxItem;
-                int seconds;
-                return item != null && int.TryParse(item.Tag as string, out seconds) ? seconds : 600;
+                object tag = SelectedTag(_rangeBox);
+                return tag is int ? (int)tag : 600;
             }
         }
 
@@ -388,10 +455,9 @@ namespace ScenarioLab.Client
             JumpToNow();
         }
 
-        private void OnRangeChanged(object sender, SelectionChangedEventArgs e)
+        private void OnRangeChanged()
         {
-            // Fires once while the XAML is still being built (the default item is selected): ignore that one.
-            if (_timeSlider == null)
+            if (_settingFromCode)
             {
                 return;
             }
@@ -639,7 +705,7 @@ namespace ScenarioLab.Client
                 SetStatus("Write your scenario in the box first.");
                 return;
             }
-            var expectedItem = _ownExpectedBox.SelectedItem as ComboBoxItem;
+            string expected = SelectedTag(_ownExpectedBox) as string ?? Scenario.Detect;
             int number = _suggestions.Count(s => s.Source == Scenario.FromUser) + 1;
             var own = new Scenario
             {
@@ -648,7 +714,7 @@ namespace ScenarioLab.Client
                 Category = "user",
                 Where = "",
                 Source = Scenario.FromUser,
-                Expected = expectedItem != null ? (string)expectedItem.Tag : Scenario.Detect,
+                Expected = expected,
                 IsSelected = true
             };
             _suggestions.Add(own);
@@ -811,7 +877,6 @@ namespace ScenarioLab.Client
                     ? _allCameras.FirstOrDefault(c => string.Equals(c.Name, row.Id, StringComparison.OrdinalIgnoreCase))
                     : FindCameraFor(row.Id);
             }
-            _scenarioGrid.Items.Refresh();
             int found = _rows.Count(r => r.Camera != null);
             if (_rows.Count > 0)
             {
@@ -833,21 +898,52 @@ namespace ScenarioLab.Client
                 || c.Name.StartsWith(id + " ", StringComparison.OrdinalIgnoreCase));
         }
 
-        private void OnScenarioRowSelected(object sender, SelectionChangedEventArgs e)
+        /// <summary>Selects a row from code and shows it (does not rely on the table raising its event).</summary>
+        private void SelectRow(Scenario row)
         {
-            var row = _scenarioGrid.SelectedItem as Scenario;
-            if (row == null)
+            if (_scenarioGrid.SelectedItem != row)
             {
+                _scenarioGrid.SelectedItem = row;
+            }
+            ShowRow(row);
+        }
+
+        /// <summary>Shows a row: its clip live on the right, its answer, its expected result in the drop-down.</summary>
+        private void ShowRow(Scenario row)
+        {
+            if (row == null || row == _shownRow)
+            {
+                UpdateHafniaControls();
                 return;
             }
+            _shownRow = row;
             _hafniaAnswer.Text = row.Answer ?? (row.Camera == null
                 ? "No XProtect camera for this scenario yet. Expected name: " + row.Id + " (or " + row.Id + "_something)."
                 : "Not tested yet.");
+            _settingFromCode = true;
+            _rowExpectedBox.SelectedItem = FindDropDownItem(_rowExpectedBox, row.Expected);
+            _settingFromCode = false;
             if (_page == 2)
             {
                 ConnectClipView(row.Camera);
             }
             UpdateHafniaControls();
+        }
+
+        /// <summary>The user changed "Expected for the selected clip": store it and recompute PASS / FAIL.</summary>
+        private void OnRowExpectedChanged()
+        {
+            var row = _scenarioGrid.SelectedItem as Scenario;
+            string expected = SelectedTag(_rowExpectedBox) as string;
+            if (_settingFromCode || row == null || expected == null || row.Expected == expected)
+            {
+                return;
+            }
+            row.Expected = expected;
+            if (row.Got == "detected" || row.Got == "not detected")
+            {
+                row.Result = (row.Got == "detected") == (expected == Scenario.Detect) ? "PASS" : "FAIL";
+            }
         }
 
         private void ConnectClipView(Item camera)
@@ -902,15 +998,15 @@ namespace ScenarioLab.Client
             _runSelectedButton.IsEnabled = connected && !_testRunning && row != null && row.Camera != null;
             _runAllButton.IsEnabled = connected && !_testRunning && runnable > 0;
             _runAllButton.Content = "Run all (" + runnable + (runnable == 1 ? " request)" : " requests)");
+            _rowExpectedBox.IsEnabled = row != null && !_testRunning;
         }
 
         private int WindowSeconds
         {
             get
             {
-                var item = _windowBox.SelectedItem as ComboBoxItem;
-                int seconds;
-                return item != null && int.TryParse(item.Tag as string, out seconds) ? seconds : 10;
+                object tag = SelectedTag(_windowBox);
+                return tag is int ? (int)tag : 10;
             }
         }
 
@@ -919,8 +1015,8 @@ namespace ScenarioLab.Client
         {
             // "async void" is only allowed for event handlers: an exception escaping it would crash Smart Client,
             // so everything is inside try/catch.
-            string password = _gatewayPassword.Password;
-            _gatewayPassword.Clear();
+            // Milestone's password box: read once here; the text stays masked in the box until the panel closes.
+            string password = _gatewayPassword.Password ?? string.Empty;
             if (password.Length == 0)
             {
                 _hafniaState.Text = "Type the gateway password first.";
@@ -1052,7 +1148,7 @@ namespace ScenarioLab.Client
             row.StartUtc = startUtc;
             row.EndUtc = endUtc;
             row.Got = "sending…";
-            _scenarioGrid.SelectedItem = row;
+            SelectRow(row);
             string where = progressPrefix + row.CameraLabel + ", " + startUtc.ToString("HH:mm:ss") + "–" + endUtc.ToString("HH:mm:ss") + " UTC: ";
 
             try
