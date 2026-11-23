@@ -1,27 +1,56 @@
-# Agent mode: running the whole loop for every camera
+# After the hackathon: an agentic redesign
 
-**Status: design, not implemented.** The plug-in in this repository is the manual version: a person drives every
-step. This page describes how an AI agent could run the same loop on its own, across all the cameras of a site, with
-a person only setting the rules at the start and approving the result at the end.
+**Status: design, not implemented.** The plug-in in this repository is the version presented at the Hafnia
+Hackathon 2026, where a person drives every step. This page is the follow-up: what changed after presenting it, and
+how the same loop would be run by an AI agent across all the cameras of a site.
 
-## Why
+## Where this comes from
 
-A real site has tens or hundreds of cameras, each with its own view and its own edge cases. Doing page ① and page ②
-by hand for each camera is the slow part, and in practice it often does not get done: detection questions go live
-without ever being tested on the site's own cameras.
+Scenario Lab was presented in Copenhagen as one of the 8 finalists, at the Milestone Developer Summit. A theme that
+kept coming up in the feedback and in the conversations with people from Milestone, NVIDIA and the partner ecosystem
+was **agentic AI**: systems that do not just answer one request but carry out a whole task on their own, calling tools
+along the way.
 
-Every step of Scenario Lab already reads and writes plain files (the snapshot, `<camera>_scenarios.json`, the clips,
-`runs.jsonl`). Nothing in the loop needs a person except two decisions: what should count as an alarm, and whether the
-result is good enough to go live. So the repetitive part can be handed to an agent.
+Looking at Scenario Lab from that angle, its weak point is clear. It works well for one camera, but a real site has
+tens or hundreds of cameras, each with its own view and its own edge cases. Doing page ① and page ② by hand for every
+camera is the slow part, and in practice it often does not get done: detection questions go live without ever being
+tested on the site's own cameras.
 
-## What the person still does
+The good news is that the hackathon version was already built as separate steps that read and write plain files (the
+snapshot, `<camera>_scenarios.json`, the clips, `runs.jsonl`). Nothing in the loop needs a person except two
+decisions: what should count as an alarm, and whether the result is good enough to go live. So the repetitive part
+can be handed to an agent.
+
+## What changes from the hackathon version
+
+| | Hackathon version | Agentic version |
+|---|---|---|
+| Scope | One camera at a time | Every camera of a site, in one run |
+| Choosing the snapshot | The user scrubs the recordings with a slider | The agent picks frames at different times and asks the VLM (vision-language model) for the emptiest one |
+| What should trigger | The user ticks *Should trigger* / *Should NOT trigger* per scenario | The agent labels each scenario from a **site policy** written once; unclear cases go to the person |
+| Bad generated clips | Not detected: a broken clip shows up as a Hafnia FAIL | A local VLM checks every clip before it is tested, and regenerates it if needed |
+| Tuning the question | The user edits the question and re-runs failing rows by hand | The agent rewrites the question from Hafnia's answers and re-runs only the failing rows, within a budget |
+| Output | A PASS/FAIL table in the tab | A report per camera, with a proposed final question for the person to approve |
+| Who runs it | The plug-in, inside Smart Client | A Python runner on the local GPU server; the plug-in becomes the review and approval screen |
+
+## The operator's role
+
+**What the operator still does**
 
 1. **Writes the site policy once**, in plain language: what counts as an alarm on this site and what does not. For
    example: *"Anyone climbing the fence is an alarm. People in the loading bay after 22:00 are an alarm, except staff in
-   high-visibility vests. Cleaning and deliveries are never an alarm."* This replaces ticking *Should trigger* /
-   *Should NOT trigger* for every scenario on every camera: the agent labels each scenario from the policy.
-2. **Approves before anything changes on the system:** before the clip cameras are installed (it restarts the
+   high-visibility vests. Cleaning and deliveries are never an alarm."*
+2. **Answers the cases the policy does not cover**, which the agent flags instead of guessing.
+3. **Approves before anything changes on the system:** before the clip cameras are installed (it restarts the
    Recording Server), and before the tuned question and gateway rule go live on a real camera.
+
+**What the operator no longer does**
+
+- Pick a frame for every camera.
+- Read and tick 8 suggested scenarios for every camera.
+- Watch every generated clip to see whether the video model got it right.
+- Rewrite the question and re-run rows by trial and error.
+- Keep track of which questions were tried and why they failed: the report does it.
 
 The agent never changes the live configuration on its own.
 
@@ -40,9 +69,8 @@ The agent never changes the live configuration on its own.
  person approves ─▶ question + gateway rule go live on the real camera
 ```
 
-1. **Snapshot.** Today the user finds an empty moment with the slider. The agent fetches a few frames from the
-   recordings at different times (day and night if available) and asks the VLM (vision-language model) which one has
-   the fewest people and vehicles.
+1. **Snapshot.** The agent fetches a few frames from the recordings at different times (day and night if available)
+   and asks the VLM which one has the fewest people and vehicles.
 2. **Propose scenarios.** Stage A (`comfyui/stage_a_scenarios_from_snapshot.json`), unchanged. Output:
    `<camera>_scenarios.json`, same format as today.
 3. **Label expected.** An LLM (large language model) reads the site policy and each scenario and writes *detect* or
@@ -71,7 +99,7 @@ The **report** per camera has the chosen snapshot, the scenarios with their expe
 every question tried with its PASS/FAIL table, and the proposed final question. The person reviews it in the
 Scenario Lab tab and approves or edits it.
 
-## Tools the agent calls
+## How each part would be implemented
 
 | Tool | What it does | Exists today? |
 |---|---|---|
