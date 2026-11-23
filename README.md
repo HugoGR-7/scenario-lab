@@ -39,6 +39,15 @@ ComfyUI: Qwen3-VL for the scene analysis, LTX-2.5 for image-to-video. The two wo
 so customer footage never leaves the site. Any model works as long as it writes the same JSON and clips (see
 "Your own scenarios and clips").
 
+## Next: an agent that runs the loop for every camera
+
+Today a person drives every step, one camera at a time. But each step already reads and writes plain files (snapshot,
+scenarios JSON, clips, `runs.jsonl`), so the whole loop can be run by an AI agent across all the cameras of a site:
+pick a snapshot, propose scenarios, label what should trigger from a site policy written once in plain language,
+generate and check the clips, test them with Hafnia, rewrite the question when rows fail, and hand back a report. A
+person only approves before anything changes on the live system. This is a design, not implemented yet:
+[docs/agent-mode.md](docs/agent-mode.md).
+
 ## Repository layout
 
 | Folder | Contents |
@@ -50,6 +59,7 @@ so customer footage never leaves the site. Any model works as long as it writes 
 | `xprotect-setup/` | Scripts that set everything up in XProtect and the Hafnia gateway. Details: `xprotect-setup/README.md` |
 | `hafnia/` | How a test becomes an alarm: prompt, keyword instruction, gateway rule, names |
 | `scripts/` | `Build-Plugin.ps1` (build + deploy), `Check-BuildEnv.ps1`, `convert_clips.py` (any video → StableFPS clip) |
+| `docs/` | `agent-mode.md`: design of an agent that runs the whole loop for every camera of a site (not implemented yet) |
 
 ## Set it up (on the hackathon machine)
 
